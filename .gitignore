@@ -1,0 +1,48 @@
+# Audio samples and recordings
+samples/
+test_samples/
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.aiff
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# TensorFlow/ML models (large files)
+models/yamnet_model/
+*.h5
+*.pb
+*.tflite
+
+# Logs and temp files
+*.log
+*.tmp
+temp/
+
+# Jupyter notebooks checkpoints
+.ipynb_checkpoints/
+
+# Distribution
+dist/
+build/
+*.egg-info/
