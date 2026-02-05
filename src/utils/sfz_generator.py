@@ -19,17 +19,19 @@ class SFZGenerator:
         Returns:
             SFZ content as string
         """
-        if detected_pitch:
-            # Convert Hz to MIDI note number
+        # Set defaults first
+        midi_note = 60
+        note_name = "C4"
+        pitch_comment = "// No pitch detected - defaulting to C4"
+        
+        # Override if pitch was detected
+        if detected_pitch is not None:
             midi_note = librosa.hz_to_midi(detected_pitch)
             note_name = librosa.hz_to_note(detected_pitch)
-        else:
-            # Default to middle C if no pitch detected
-            midi_note = 60
-            note_name = "C4"
+            pitch_comment = f"// Detected Pitch: {detected_pitch:.2f} Hz ({note_name})"
         
         sfz_content = f"""// {label} Sample
-// Detected Pitch: {detected_pitch:.2f} Hz ({note_name}) if detected_pitch else "No pitch detected"
+{pitch_comment}
 <region>
 sample={audio_filename}
 pitch_keycenter={int(round(midi_note))}
