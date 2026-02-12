@@ -11,7 +11,7 @@ from .config import (
 )
 from .processors import (
     AudioRecorder, AudioTrimmer, AudioNormalizer,
-    PitchDetector, AudioClassifier
+    PitchDetector, AudioClassifier, HighPassFilter, DTLNDenoiser
 )
 from .utils import load_audio, save_audio, SpectrogramPlotter, FileManager, SFZGenerator
 
@@ -21,6 +21,8 @@ class SmartSampler:
     
     def __init__(self):
         self.recorder = AudioRecorder()
+        self.high_pass_filter = HighPassFilter()
+        self.dtln_denoiser = None # Lazy Load
         self.trimmer = AudioTrimmer()
         self.normalizer = AudioNormalizer()
         self.pitch_detector = PitchDetector()
@@ -29,7 +31,7 @@ class SmartSampler:
         self.file_manager = FileManager()
         self.sfz_generator = SFZGenerator()
     
-    def process(self, input_path: str, output_path: str) -> dict:
+    def process(self, input_path: str, output_path: str, use_dtln = False) -> dict:
         """
         Run full processing pipeline.
         
@@ -45,20 +47,29 @@ class SmartSampler:
         # Load audio
         audio, sr = load_audio(input_path)
         raw_audio = audio.copy()
+
+        # 1. High pass filter (remove low-frequency noise first)
+        audio, hpf_stats = self.high_pass_filter.apply(audio, sr)
+
+        # 2. DTLN noise reduction (optional)
+        if use_dtln:
+            if self.dtln_denoiser is None:
+                self.dtln_denoiser = DTLNDenoiser() 
+            audio, dtln_stats = self.dtln_denoiser.apply(audio, sr)
         
-        # 1. Trim silence
+        # 2. Trim silence
         audio, trim_stats = self.trimmer.trim(audio, sr)
         
-        # 2. Normalize (for classification)
+        # 3. Normalize (for classification)
         audio, norm_stats = self.normalizer.normalize(audio)
         
-        # 3. Classify (before pitch shift for accuracy)
+        # 4. Classify (before pitch shift for accuracy)
         predictions = self.classifier.classify(audio, sr)
         
-        # 4. Detect pitch
+        # 5. Detect pitch
         detected_pitch, pitch_stats = self.pitch_detector.detect(audio, sr)
         
-        # 5. Final normalization
+        # 6. Final normalization
         audio, final_norm_stats = self.normalizer.normalize(audio)
         
         # Save processed audio
@@ -110,6 +121,16 @@ class SmartSampler:
         else:
             print("\n🎙️ LIVE MODE - Recording from microphone\n")
             self.recorder.record(RAW_FILENAME)
+
+        # DTLN User Choice
+        print("\n Apply DTLN Noise Reduction? (may result in artefacting/removal of desired noise)")
+        use_dtln_input = input("Use DTLN? (Y/N): ").strip().lower()
+        use_dtln = use_dtln_input in ('y', 'yes')
+
+        if use_dtln:
+            print("DTLN will be applied")
+        else:
+            print("Skipping DTLN")
         
         # Process audio
         results = self.process(RAW_FILENAME, CLEAN_FILENAME)

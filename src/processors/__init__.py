@@ -5,6 +5,8 @@ from .normalizer import AudioNormalizer
 from .pitch_detector import PitchDetector
 from .transposer import PitchTransposer
 from .classifier import AudioClassifier
+from .high_pass_filter import HighPassFilter
+from .dtln_denoiser import DTLNDenoiser
 
 __all__ = [
     'AudioRecorder',
@@ -12,5 +14,7 @@ __all__ = [
     'AudioNormalizer',
     'PitchDetector',
     'PitchTransposer',
-    'AudioClassifier'
+    'AudioClassifier',
+    'HighPassFilter',
+    'DTLNDenoiser'
 ]
