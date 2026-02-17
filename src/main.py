@@ -110,14 +110,35 @@ class SmartSampler:
         
         if TEST_MODE:
             print("\n🧪 TEST MODE - Using pre-recorded audio")
-            print(f"   Looking for: {TEST_AUDIO_PATH}\n")
             
-            if not os.path.exists(TEST_AUDIO_PATH):
-                print(f"❌ Error: Test file not found!")
-                print(f"   Please place a WAV file at: {TEST_AUDIO_PATH}")
+            #get all WAV files in directory
+            test_dir = os.path.dirname(TEST_AUDIO_PATH)
+            wav_files = [f for f in os.listdir(test_dir) if f.lower().endswith('wav')]
+
+            if not wav_files:
+                print(f"Error: No WAV files found in {test_dir}")
                 return
-            
-            shutil.copy2(TEST_AUDIO_PATH, RAW_FILENAME)
+            #Display available files
+            print(f"Available test samples")
+            for i, filename in enumerate(wav_files, 1):
+                print(f"   {i}. {filename}")
+
+            # Prompt user to select file
+            while True:
+                try:
+                    choice = input(f"Select a file to process (1-{len(wav_files)}): ").strip()
+                    idx = int(choice) - 1
+                    if 0 <= idx < len(wav_files):
+                        selected_file = os.path.join(test_dir, wav_files[idx])
+                        print(f"Selected file: {wav_files[idx]}\n")
+                        break
+                    else:
+                        print(f"Please enter a number between 1 and {len(wav_files)}.")
+                except (ValueError, KeyboardInterrupt):
+                    print("Invalid input. Please enter a valid number.")
+                    continue
+
+            shutil.copy2(selected_file, RAW_FILENAME)
         else:
             print("\n🎙️ LIVE MODE - Recording from microphone\n")
             self.recorder.record(RAW_FILENAME)
