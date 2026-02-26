@@ -9,8 +9,9 @@ TEST_SAMPLES_DIR = os.path.join(BASE_DIR, 'test_samples')
 
 # === AUDIO SETTINGS ===
 SAMPLE_RATE = 16000
+TASCAM_SAMPLE_RATE = 48000
 RECORD_SECONDS = 6
-CHANNELS = 1
+CHANNELS = 2
 CHUNK_SIZE = 1024
 
 # === PROCESSING SETTINGS ===
@@ -22,7 +23,7 @@ HPF_CUTOFF = 80  # High pass filter cutoff frequency in Hz
 HPF_ORDER = 4    # Filter order (4 = 24dB/octave rolloff)
 
 # === DTLN SETTINGS ===
-DTLN_MODEL_PATH = os.path.join(BASE_DIR, 'models', 'dtln_model')
+DTLN_MODEL_PATH = os.path.join(BASE_DIR, 'models', 'dtln')
 DTLN_BLOCK_LEN = 512
 DTLN_BLOCK_SHIFT = 128
 
@@ -38,3 +39,9 @@ TEST_AUDIO_PATH = os.path.join(TEST_SAMPLES_DIR, 'test_input.wav')
 # === FILENAMES ===
 RAW_FILENAME = 'sample_raw.wav'
 CLEAN_FILENAME = 'sample_clean.wav'
+
+# === MIDI PLAYER SETTINGS ===
+SFIZZ_BINARY = 'sfizz_jack'
+JACK_AUDIO_DEVICE = 'hw:3'
+JACK_SAMPLE_RATE  = 44100
+JACK_BUFFER_SIZE  = 256

@@ -16,7 +16,8 @@ class SpectrogramPlotter:
     
     def plot_comparison(self, raw_audio: np.ndarray, clean_audio: np.ndarray,
                         raw_pitch: float | None, clean_pitch: float | None,
-                        output_path: str):
+                        output_path: str,
+                        sample_rate: int | None = None):
         """
         Generate side-by-side spectrogram comparison.
         
@@ -28,10 +29,13 @@ class SpectrogramPlotter:
             output_path: Output image path
         """
         print("📊 Generating spectrograms...")
+
+        # Use passed sample rate if provided, else fall back to init value
+        sr = sample_rate if sample_rate is not None else self.sr
         
         # Compute mel spectrograms
-        S_raw = librosa.feature.melspectrogram(y=raw_audio, sr=self.sr, n_mels=128, fmax=8000)
-        S_clean = librosa.feature.melspectrogram(y=clean_audio, sr=self.sr, n_mels=128, fmax=8000)
+        S_raw = librosa.feature.melspectrogram(y=raw_audio, sr=sr, n_mels=128, fmax=8000)
+        S_clean = librosa.feature.melspectrogram(y=clean_audio, sr=sr, n_mels=128, fmax=8000)
         
         S_raw_db = librosa.power_to_db(S_raw, ref=np.max)
         S_clean_db = librosa.power_to_db(S_clean, ref=np.max)
@@ -40,16 +44,16 @@ class SpectrogramPlotter:
         fig, axes = plt.subplots(3, 2, figsize=(14, 12))
         
         # Row 1: Waveforms
-        self._plot_waveform(axes[0, 0], raw_audio, raw_pitch, 'Raw Waveform')
-        self._plot_waveform(axes[0, 1], clean_audio, clean_pitch, 'Processed Waveform', color='green')
+        self._plot_waveform(axes[0, 0], raw_audio, raw_pitch, 'Raw Waveform', sr=sr)
+        self._plot_waveform(axes[0, 1], clean_audio, clean_pitch, 'Processed Waveform', color='green', sr=sr)
         
         # Row 2: Spectrograms
-        self._plot_spectrogram(axes[1, 0], S_raw_db, raw_pitch, 'Raw Spectrogram', fig)
-        self._plot_spectrogram(axes[1, 1], S_clean_db, clean_pitch, 'Processed Spectrogram', fig)
+        self._plot_spectrogram(axes[1, 0], S_raw_db, raw_pitch, 'Raw Spectrogram', fig, sr=sr)
+        self._plot_spectrogram(axes[1, 1], S_clean_db, clean_pitch, 'Processed Spectrogram', fig, sr=sr)
         
         # Row 3: Frequency analysis and stats
         self._plot_frequency_comparison(axes[2, 0], S_raw_db, S_clean_db, raw_pitch, clean_pitch)
-        self._plot_stats(axes[2, 1], raw_audio, clean_audio, raw_pitch, clean_pitch)
+        self._plot_stats(axes[2, 1], raw_audio, clean_audio, raw_pitch, clean_pitch, sr=sr)
         
         plt.tight_layout()
         plt.savefig(output_path, dpi=150, bbox_inches='tight')
@@ -57,9 +61,10 @@ class SpectrogramPlotter:
         
         print(f"✅ Spectrogram saved as {output_path}")
     
-    def _plot_waveform(self, ax, audio, pitch, title, color='blue'):
+    def _plot_waveform(self, ax, audio, pitch, title, color='blue', sr=None):
         """Plot waveform with pitch annotation"""
-        times = np.linspace(0, len(audio) / self.sr, len(audio))
+        sr = sr or self.sr
+        times = np.linspace(0, len(audio) / sr, len(audio))
         ax.plot(times, audio, linewidth=0.5, color=color)
         
         pitch_text = f"{pitch:.2f} Hz ({librosa.hz_to_note(pitch)})" if pitch else "No pitch detected"
@@ -68,9 +73,10 @@ class SpectrogramPlotter:
         ax.set_ylabel('Amplitude')
         ax.grid(True, alpha=0.3)
     
-    def _plot_spectrogram(self, ax, S_db, pitch, title, fig):
+    def _plot_spectrogram(self, ax, S_db, pitch, title, fig, sr=None):
         """Plot mel spectrogram with pitch line"""
-        img = librosa.display.specshow(S_db, x_axis='time', y_axis='mel', sr=self.sr,
+        sr = sr or self.sr
+        img = librosa.display.specshow(S_db, x_axis='time', y_axis='mel', sr=sr,
                                         fmax=8000, ax=ax, cmap='viridis')
         ax.set_title(title, fontsize=12, fontweight='bold')
         fig.colorbar(img, ax=ax, format='%+2.0f dB')
@@ -99,28 +105,29 @@ class SpectrogramPlotter:
         ax.grid(True, alpha=0.3)
         ax.set_xscale('log')
     
-    def _plot_stats(self, ax, raw_audio, clean_audio, raw_pitch, clean_pitch):
+    def _plot_stats(self, ax, raw_audio, clean_audio, raw_pitch, clean_pitch, sr=None):
         """Plot processing statistics"""
+        sr = sr or self.sr
         raw_pitch_text = f"{raw_pitch:.2f} Hz" if raw_pitch else "N/A"
         clean_pitch_text = f"{clean_pitch:.2f} Hz" if clean_pitch else "N/A"
         
         stats_text = f"""Processing Statistics:
 
 Raw Audio:
-• Duration: {len(raw_audio)/self.sr:.2f}s
+• Duration: {len(raw_audio)/sr:.2f}s
 • Peak: {np.abs(raw_audio).max():.4f}
 • RMS: {np.sqrt(np.mean(raw_audio**2)):.4f}
 • Pitch: {raw_pitch_text}
 
 Processed Audio:
-• Duration: {len(clean_audio)/self.sr:.2f}s
+• Duration: {len(clean_audio)/sr:.2f}s
 • Peak: {np.abs(clean_audio).max():.4f}
 • RMS: {np.sqrt(np.mean(clean_audio**2)):.4f}
 • Pitch: {clean_pitch_text}
 
 Changes:
 • Trimmed: {len(raw_audio) - len(clean_audio)} samples
-• Time saved: {(len(raw_audio) - len(clean_audio))/self.sr:.2f}s
+• Time saved: {(len(raw_audio) - len(clean_audio))/sr:.2f}s
 """
         
         ax.text(0.1, 0.5, stats_text, fontsize=10, family='monospace',

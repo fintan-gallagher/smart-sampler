@@ -1,13 +1,23 @@
 """SFZ metadata generator"""
 import os
 import librosa
+import soundfile as sf
+import numpy as np
 
 
 class SFZGenerator:
     """Generates SFZ metadata for samplers"""
+
+    def _get_sample_frames(self, audio_path: str) -> int | None:
+        """Get total number of frames in a WAV file."""
+        try:
+            info = sf.info(audio_path)
+            return info.frames
+        except Exception:
+            return None
     
     def generate(self, audio_filename: str, detected_pitch: float | None, 
-                 label: str) -> str:
+                 label: str, audio_path: str | None = None) -> str:
         """
         Generate SFZ metadata for a sample.
         
@@ -29,6 +39,12 @@ class SFZGenerator:
             midi_note = librosa.hz_to_midi(detected_pitch)
             note_name = librosa.hz_to_note(detected_pitch)
             pitch_comment = f"// Detected Pitch: {detected_pitch:.2f} Hz ({note_name})"
+
+        loop_end_line = ""
+        if audio_path is not None:
+            frames = self._get_sample_frames(audio_path)
+            if frames is not None and frames > 0:
+                loop_end_line = f"loop_end={frames - 1}"
         
         sfz_content = f"""// {label} Sample
 {pitch_comment}
@@ -39,6 +55,11 @@ lokey=0
 hikey=127
 lovel=0
 hivel=127
+
+// Loop settings — sustain loop while key is held
+loop_mode=loop_sustain
+loop_start=0
+{loop_end_line}
 """
         
         return sfz_content
@@ -54,7 +75,11 @@ hivel=127
             detected_pitch: Detected pitch in Hz
             label: Sample label/name
         """
-        sfz_content = self.generate(audio_filename, detected_pitch, label)
+
+        audio_dir  = os.path.dirname(output_path)
+        audio_path = os.path.join(audio_dir, audio_filename)
+
+        sfz_content = self.generate(audio_filename, detected_pitch, label, audio_path=audio_path)
         
         with open(output_path, 'w') as f:
             f.write(sfz_content)

@@ -1,6 +1,8 @@
 """Main entry point for Smart Sampler"""
 import os
 import shutil
+import numpy as np
+import librosa
 
 # Optimize TensorFlow for Pi
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
@@ -30,6 +32,12 @@ class SmartSampler:
         self.plotter = SpectrogramPlotter()
         self.file_manager = FileManager()
         self.sfz_generator = SFZGenerator()
+
+    def _to_mono(self, audio: np.ndarray) -> np.ndarray:
+        """Convert stereo [channels, samples] to mono [samples]"""
+        if audio.ndim == 2:
+            return np.mean(audio, axis=0)
+        return audio
     
     def process(self, input_path: str, output_path: str, use_dtln = False) -> dict:
         """
@@ -45,8 +53,10 @@ class SmartSampler:
         print("🎧 Processing audio...")
         
         # Load audio
-        audio, sr = load_audio(input_path)
+        audio, sr = load_audio(input_path, sr=None, mono=False)
         raw_audio = audio.copy()
+        channels = audio.shape[0] if audio.ndim == 2 else 1
+        print(f"   Loaded: {sr}Hz | {'Stereo' if channels == 2 else 'Mono'} | {audio.shape[-1]} samples")
 
         # 1. High pass filter (remove low-frequency noise first)
         audio, hpf_stats = self.high_pass_filter.apply(audio, sr)
@@ -54,36 +64,48 @@ class SmartSampler:
         # 2. DTLN noise reduction (optional)
         if use_dtln:
             if self.dtln_denoiser is None:
-                self.dtln_denoiser = DTLNDenoiser() 
-            audio, dtln_stats = self.dtln_denoiser.apply(audio, sr)
+                self.dtln_denoiser = DTLNDenoiser()
+            if audio.ndim == 2:
+                # Process each channel independently
+                denoised_channels = []
+                for ch in range(audio.shape[0]):
+                    ch_16k = librosa.resample(audio[ch], orig_sr=sr, target_sr=16000)
+                    ch_denoised, _ = self.dtln_denoiser.apply(ch_16k, 16000)
+                    ch_native = librosa.resample(ch_denoised, orig_sr=16000, target_sr=sr)
+                    denoised_channels.append(ch_native)
+                audio = np.stack(denoised_channels, axis=0)
+            else:
+                audio_16k = librosa.resample(audio, orig_sr=sr, target_sr=16000)
+                audio_16k, _ = self.dtln_denoiser.apply(audio_16k, 16000)
+                audio = librosa.resample(audio_16k, orig_sr=16000, target_sr=sr)
+            print(f"   DTLN applied, restored to {sr}Hz")
         
-        # 2. Trim silence
+        # 3. Trim silence
         audio, trim_stats = self.trimmer.trim(audio, sr)
         
-        # 3. Normalize (for classification)
+        # 4. Normalize (for classification)
         audio, norm_stats = self.normalizer.normalize(audio)
         
-        # 4. Classify (before pitch shift for accuracy)
-        predictions = self.classifier.classify(audio, sr)
+        # 5. Classify (before pitch shift for accuracy)
+        mono_mix = self._to_mono(audio)
+        audio_for_classification = librosa.resample(mono_mix, orig_sr=sr, target_sr=16000) if sr != 16000 else mono_mix
+        predictions = self.classifier.classify(audio_for_classification, 16000)
         
-        # 5. Detect pitch
-        detected_pitch, pitch_stats = self.pitch_detector.detect(audio, sr)
-        
-        # 6. Final normalization
-        audio, final_norm_stats = self.normalizer.normalize(audio)
+        # 6. Detect pitch
+        detected_pitch, pitch_stats = self.pitch_detector.detect(mono_mix, sr)
         
         # Save processed audio
         save_audio(output_path, audio, sr)
-        print(f"✅ Processed audio saved as {output_path}")
+        print(f"Saved: {output_path} ({sr}Hz, {'stereo' if audio.ndim == 2 else 'mono'})")
         
         # Print stats
-        self._print_stats(raw_audio, audio, sr, detected_pitch)
+        self._print_stats(self._to_mono(raw_audio), mono_mix, sr, detected_pitch)
         
         return {
             'predictions': predictions,
             'detected_pitch': detected_pitch,
-            'raw_audio': raw_audio,
-            'clean_audio': audio,
+            'raw_audio': self._to_mono(raw_audio),
+            'clean_audio': mono_mix,
             'sample_rate': sr
         }
     
@@ -154,7 +176,7 @@ class SmartSampler:
             print("Skipping DTLN")
         
         # Process audio
-        results = self.process(RAW_FILENAME, CLEAN_FILENAME)
+        results = self.process(RAW_FILENAME, CLEAN_FILENAME, use_dtln)
         
         # Get label from user
         label = self.file_manager.prompt_label_selection(results['predictions'])
@@ -166,7 +188,8 @@ class SmartSampler:
                 results['clean_audio'],
                 results['detected_pitch'],
                 results['detected_pitch'],
-                path
+                path,
+                sample_rate=results['sample_rate']
             )
 
         def gen_sfz(path, audio_filename):

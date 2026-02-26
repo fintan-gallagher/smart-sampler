@@ -23,15 +23,23 @@ class AudioTrimmer:
         """
         print("✂️ Trimming silence...")
         
-        original_length = len(audio)
-        trimmed, index = librosa.effects.trim(audio, top_db=self.top_db)
+        is_stereo = audio.ndim == 2
+        original_length = audio.shape[-1] if is_stereo else len(audio)
+
+        # Use mono mix to detect trim boundaries
+        mono_ref = np.mean(audio, axis=0) if is_stereo else audio
+        _, index = librosa.effects.trim(mono_ref, top_db=self.top_db)
+
+        # Apply same trim to all channels
+        trimmed = audio[:, index[0]:index[1]] if is_stereo else audio[index[0]:index[1]]
+        trimmed_length = trimmed.shape[-1] if is_stereo else len(trimmed)
         
         stats = {
             'original_samples': original_length,
-            'trimmed_samples': len(trimmed),
-            'samples_removed': original_length - len(trimmed),
+            'trimmed_samples': trimmed_length,
+            'samples_removed': original_length - trimmed_length,
             'original_duration': original_length / sr,
-            'trimmed_duration': len(trimmed) / sr,
+            'trimmed_duration': trimmed_length / sr,
             'trim_start': index[0],
             'trim_end': index[1]
         }

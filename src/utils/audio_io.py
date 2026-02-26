@@ -5,7 +5,7 @@ import soundfile as sf
 from ..config import SAMPLE_RATE
 
 
-def load_audio(filepath: str, sr: int = SAMPLE_RATE) -> tuple[np.ndarray, int]:
+def load_audio(filepath: str, sr: int | None = None, mono: bool = False) -> tuple[np.ndarray, int]:
     """
     Load audio file.
     
@@ -16,7 +16,7 @@ def load_audio(filepath: str, sr: int = SAMPLE_RATE) -> tuple[np.ndarray, int]:
     Returns:
         Tuple of (audio_array, sample_rate)
     """
-    audio, sample_rate = librosa.load(filepath, sr=sr)
+    audio, sample_rate = librosa.load(filepath, sr=sr, mono=mono)
     return audio, sample_rate
 
 
@@ -29,4 +29,7 @@ def save_audio(filepath: str, audio: np.ndarray, sr: int = SAMPLE_RATE):
         audio: Audio samples
         sr: Sample rate
     """
+
+    if audio.ndim == 2:
+        audio = audio.T
     sf.write(filepath, audio, sr)

@@ -2,8 +2,7 @@
 import sounddevice as sd
 import soundfile as sf
 import numpy as np
-import librosa
-from ..config import SAMPLE_RATE, CHANNELS
+from ..config import TASCAM_SAMPLE_RATE, CHANNELS
 
 
 class AudioRecorder:
@@ -45,8 +44,7 @@ class AudioRecorder:
             device_id = None
         
         print(f"\n🎙️ Recording from Tascam DR-05X...")
-        print(f"   Native sample rate: {self.TASCAM_SAMPLE_RATE} Hz")
-        print(f"   Target sample rate: {SAMPLE_RATE} Hz")
+        print(f"   Native sample rate: {TASCAM_SAMPLE_RATE} Hz")
         print("   Press ENTER to stop recording\n")
         
         # Record in chunks at Tascam's native sample rate
@@ -61,7 +59,7 @@ class AudioRecorder:
             with sd.InputStream(
                 device=device_id,
                 channels=CHANNELS,
-                samplerate=self.TASCAM_SAMPLE_RATE,
+                samplerate=TASCAM_SAMPLE_RATE,
                 callback=callback
             ):
                 input("   [Recording... Press ENTER to stop]")
@@ -75,22 +73,10 @@ class AudioRecorder:
         if recording:
             audio = np.concatenate(recording, axis=0)
             
-            # Convert to mono if stereo
-            if audio.ndim > 1:
-                audio = np.mean(audio, axis=1)
-            
-            # Resample to target sample rate (16kHz for YAMNet)
-            if self.TASCAM_SAMPLE_RATE != SAMPLE_RATE:
-                print(f"   Resampling {self.TASCAM_SAMPLE_RATE} Hz → {SAMPLE_RATE} Hz...")
-                audio = librosa.resample(
-                    audio, 
-                    orig_sr=self.TASCAM_SAMPLE_RATE, 
-                    target_sr=SAMPLE_RATE
-                )
-            
             # Save at target sample rate
-            sf.write(output_path, audio, SAMPLE_RATE)
+            sf.write(output_path, audio, TASCAM_SAMPLE_RATE)
+            duration = len(audio) / TASCAM_SAMPLE_RATE
             print(f"✅ Recording saved: {output_path}")
-            print(f"   Duration: {len(audio)/SAMPLE_RATE:.2f}s")
+            print(f"Duration: {duration:.2f}s | Channels: {audio.shape[1]} | Rate: {TASCAM_SAMPLE_RATE}Hz")
         else:
             print("❌ No audio recorded")

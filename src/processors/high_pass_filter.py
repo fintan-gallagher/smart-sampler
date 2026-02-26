@@ -39,8 +39,8 @@ class HighPassFilter:
         
         b, a = signal.butter(self.order, normalized_cutoff, btype='high')
         
-        # Apply filter (filtfilt for zero phase distortion)
-        filtered = signal.filtfilt(b, a, audio)
+        # Apply filter
+        filtered = signal.filtfilt(b, a, audio, axis=-1)
         
         # Measure noise reduction
         original_rms = np.sqrt(np.mean(audio**2))
