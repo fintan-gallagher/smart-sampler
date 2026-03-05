@@ -12,6 +12,7 @@ import subprocess
 import numpy as np
 import pygame
 
+
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
@@ -158,7 +159,12 @@ class SamplerApp:
         pygame.init()
         pygame.mixer.init(frequency=SAMPLE_RATE, channels=1)
 
-        self.screen = pygame.display.set_mode((SCREEN_W, SCREEN_H))
+        info = pygame.display.Info()
+        if info.current_w <=480 and info.current_h <= 320:
+            self.screen = pygame.display.set_mode((SCREEN_W, SCREEN_H), pygame.FULLSCREEN)
+        else:
+            self.screen = pygame.display.set_mode((SCREEN_W, SCREEN_H))
+            
         pygame.display.set_caption("Smart Sampler")
         self.clock  = pygame.time.Clock()
 
