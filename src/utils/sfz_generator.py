@@ -17,7 +17,8 @@ class SFZGenerator:
             return None
     
     def generate(self, audio_filename: str, detected_pitch: float | None, 
-                 label: str, audio_path: str | None = None) -> str:
+                 label: str, audio_path: str | None = None,
+                 fixed_velocity: bool =False) -> str:
         """
         Generate SFZ metadata for a sample.
         
@@ -45,6 +46,11 @@ class SFZGenerator:
             frames = self._get_sample_frames(audio_path)
             if frames is not None and frames > 0:
                 loop_end_line = f"loop_end={frames - 1}"
+
+        if fixed_velocity:
+            vel_lines = "lovel=0\nhivel=127\namp_veltrack=0"
+        else:
+            vel_lines = "lovel=0\nhivel=127"
         
         sfz_content = f"""// {label} Sample
 {pitch_comment}
@@ -53,8 +59,7 @@ sample={audio_filename}
 pitch_keycenter={int(round(midi_note))}
 lokey=0
 hikey=127
-lovel=0
-hivel=127
+{vel_lines}
 
 // Loop settings — sustain loop while key is held
 loop_mode=loop_sustain
@@ -65,7 +70,8 @@ loop_start=0
         return sfz_content
     
     def save(self, output_path: str, audio_filename: str, 
-             detected_pitch: float | None, label: str):
+             detected_pitch: float | None, label: str,
+             fixed_velocity: bool = False):
         """
         Generate and save SFZ file.
         
@@ -79,7 +85,7 @@ loop_start=0
         audio_dir  = os.path.dirname(output_path)
         audio_path = os.path.join(audio_dir, audio_filename)
 
-        sfz_content = self.generate(audio_filename, detected_pitch, label, audio_path=audio_path)
+        sfz_content = self.generate(audio_filename, detected_pitch, label, audio_path=audio_path, fixed_velocity=fixed_velocity)
         
         with open(output_path, 'w') as f:
             f.write(sfz_content)
