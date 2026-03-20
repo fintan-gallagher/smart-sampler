@@ -1,10 +1,14 @@
 """
 HandlersMixin — pygame event handling and browser helper methods for SamplerApp.
 """
+import os
 import threading
+import shutil
 
 import numpy as np
 import pygame
+
+from src.config import SAMPLES_DIR
 
 from .events import (
     EV_RECORD_DONE, EV_PROCESS_DONE, EV_PROCESS_ERR,
@@ -17,6 +21,7 @@ from .theme import (
     font,
 )
 from .widgets import Button
+from .prefs import save_prefs
 
 
 class HandlersMixin:
@@ -55,6 +60,40 @@ class HandlersMixin:
 
         s = self._state
 
+        # ── DTLN WARNING OVERLAY ───────────────────────────────────────────
+        if self._dtln_warning:
+            if self.dtln_btn_cancel.handle(ev):
+                self._dtln_warning = False
+            elif self.dtln_btn_ok.handle(ev):
+                self.h_dtln_toggle.value = True
+                if self._dtln_warn_no_show:
+                    self._prefs['dtln_warn_dismissed'] = True
+                    save_prefs(self._prefs)
+                self._dtln_warning = False
+            elif (ev.type == pygame.MOUSEBUTTONUP
+                  and self.dtln_warn_cb_rect.collidepoint(ev.pos)):
+                self._dtln_warn_no_show = not self._dtln_warn_no_show
+            return
+
+        # ── DELETE CONFIRMATION OVERLAY ────────────────────────────────
+        if self._confirm_delete is not None:
+            if self.cont_btn_no.handle(ev):
+                self._confirm_delete = None
+            elif self.cont_btn_yes.handle(ev):
+                action = self._confirm_delete.get('action')
+                if action == 'delete_folder':
+                    folder = self._confirm_delete['folder']
+                    shutil.rmtree(os.path.join(SAMPLES_DIR, folder))
+                    self._confirm_delete = None
+                    self._open_browser()
+                elif action == 'delete_file':
+                    path = self._confirm_delete['path']
+                    pygame.mixer.music.stop()
+                    os.remove(path)
+                    self._confirm_delete = None
+                    self._open_browser_folder(self._browser_sel_folder)
+            return   # block all other input while overlay is showing
+
         # ── HOME ──────────────────────────────────────────────────────
         if s == 'home':
             if self.h_btn_quit.handle(ev):
@@ -68,9 +107,21 @@ class HandlersMixin:
                 self._start_test_pick()
             if self.h_btn_browse.handle(ev):
                 self._open_browser()
-            self.h_dtln_toggle.handle(ev)
+            if self.h_dtln_toggle.handle(ev):
+                if self.h_dtln_toggle.value and not self._prefs.get('dtln_warn_dismissed'):
+                    # undo the flip — overlay will confirm it
+                    self.h_dtln_toggle.value = False
+                    self._dtln_warn_no_show  = False
+                    self._dtln_warning       = True
 
-        # ── TEST FILE PICKER ──────────────────────────────────────────
+        # ── PRE-RECORD ────────────────────────────────────────────────────
+        elif s == 'pre_record':
+            if self.pr_btn_back.handle(ev):
+                self._go_home()
+            if self.pr_btn_record.handle(ev):
+                self._begin_recording()
+
+        # ── TEST FILE PICKER ─────────────────────────────────────────
         elif s == 'test_pick':
             if self.tp_btn_back.handle(ev):
                 self._go_home()
@@ -113,10 +164,11 @@ class HandlersMixin:
         elif s == 'label':
             for btn, lbl in self.lbl_buttons:
                 if btn.handle(ev):
-                    threading.Thread(target=self._save_worker,
-                                     args=(lbl,), daemon=True).start()
-                    self._status     = "Saving…"
+                    self._go('processing')
+                    self._status = "Saving..." 
                     self._status_col = YELLOW
+                    threading.Thread(target=self._save_worker,
+                                    args=(lbl,), daemon=True).start()
                     return
             if self.lbl_btn_back.handle(ev):
                 self._go('review')
@@ -127,17 +179,30 @@ class HandlersMixin:
                 self._go_home()
             if self.br_btn_up.handle(ev):
                 self._browser_folder_scroll = max(0, self._browser_folder_scroll - 1)
+                self._browser_sel_folder_idx = None
             if self.br_btn_dn.handle(ev):
                 max_s = max(0, len(self._browser_folders) - 5)
                 self._browser_folder_scroll = min(max_s, self._browser_folder_scroll + 1)
+                self._browser_sel_folder_idx = None  
+            if self.br_btn_open.handle(ev):                                        
+                if self._browser_sel_folder_idx is not None:                       
+                    self._open_browser_folder(                                     
+                        self._browser_folders[self._browser_sel_folder_idx])       
+            if self.br_btn_delete.handle(ev):
+                if self._browser_sel_folder_idx is not None:
+                    folder = self._browser_folders[self._browser_sel_folder_idx]
+                    self._confirm_delete = {
+                        'action': 'delete_folder',
+                        'folder': folder,
+                        'name':   folder,
+                    }
             if ev.type == pygame.MOUSEBUTTONUP:
                 ITEM_H = 48
                 for i in range(min(5, len(self._browser_folders) - self._browser_folder_scroll)):
                     row = pygame.Rect(PAD, HEADER_H + 4 + i * ITEM_H,
-                                      SCREEN_W - 50, ITEM_H - 3)
+                                      SCREEN_W - 54, ITEM_H - 3)
                     if row.collidepoint(ev.pos):
-                        self._open_browser_folder(
-                            self._browser_folders[self._browser_folder_scroll + i])
+                        self._browser_sel_folder_idx = self._browser_folder_scroll + i
                         break
 
         # ── BROWSER FILES — file list inside folder ────────────────────
@@ -153,12 +218,20 @@ class HandlersMixin:
                 self._browser_play()
             if self.brf_btn_midi.handle(ev):
                 self._go_midi_play()
+            if self.brf_btn_delete.handle(ev):
+                if self._browser_sel is not None:
+                    name, path = self._browser_files[self._browser_sel]
+                    self._confirm_delete = {
+                        'action': 'delete_file',
+                        'path':   path,
+                        'name':   name,
+                    }
             self.brf_vel_toggle.handle(ev)
             if ev.type == pygame.MOUSEBUTTONUP:
                 ITEM_H = 38
                 for i in range(min(5, len(self._browser_files) - self._browser_scroll)):
                     row = pygame.Rect(PAD, HEADER_H + 4 + i * ITEM_H,
-                                      SCREEN_W - 50, ITEM_H - 3)
+                                      SCREEN_W - 54, ITEM_H - 3)
                     if row.collidepoint(ev.pos):
                         self._browser_sel   = self._browser_scroll + i
                         self._browser_audio = None

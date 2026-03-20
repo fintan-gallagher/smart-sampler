@@ -15,6 +15,7 @@ import sys
 import shutil
 import threading
 import subprocess
+import json
 
 import pygame
 
@@ -42,6 +43,24 @@ from .widgets import Button, Toggle, WaveformWidget, draw_header, draw_status
 from .workers import WorkersMixin
 from .handlers import HandlersMixin
 from .screens import ScreensMixin
+
+from .prefs import load_prefs, save_prefs
+
+PREFS_PATH = os.path.expanduser('~/.smart_sampler_prefs.json')
+
+def _load_prefs() -> dict:
+    try:
+        with open(PREFS_PATH) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def _save_prefs(data: dict):
+    try:
+        with open(PREFS_PATH, 'w') as f:
+            json.dump(data, f)
+    except Exception:
+        pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -97,18 +116,25 @@ class SamplerApp(WorkersMixin, HandlersMixin, ScreensMixin):
         self._browser_folders: list[str] = []
         self._browser_folder_scroll = 0
         self._browser_sel_folder: str | None = None
+        self._browser_sel_folder_idx: int | None = None
 
         # Sample browser — file level
         self._browser_files: list[tuple[str, str]] = []
         self._browser_scroll = 0
         self._browser_sel    = None
         self._browser_audio  = None
+        self._confirm_delete: dict | None = None
 
         # MIDI play state
         self._sfizz_proc: subprocess.Popen | None = None
         self._midi_sfz_path: str = ""
         self._midi_status: str   = ""
         self._midi_vel_fixed: bool = False
+
+        # DTLN Warning
+        self._dtln_warning = False
+        self._dtln_warn_no_show = False
+        self._prefs = _load_prefs()
 
         self._build_widgets()
 
@@ -129,6 +155,13 @@ class SamplerApp(WorkersMixin, HandlersMixin, ScreensMixin):
                                     "Use DTLN denoising")
         self.h_btn_quit    = Button((SCREEN_W - 78, 7, 68, 32),
                                     "Quit", RED_DIM, WHITE, fsize=14)
+        
+        # ── DTLN WARNING OVERLAY ──────────────────────────────────────────
+        self.dtln_btn_ok     = Button((SCREEN_W//2 - 110, SCREEN_H//2 + 34, 100, 40),
+                                      "Enable", ACCENT, BLACK, bold=True, fsize=13)
+        self.dtln_btn_cancel = Button((SCREEN_W//2 + 10,  SCREEN_H//2 + 34, 100, 40),
+                                      "Cancel", RED, WHITE, bold=True, fsize=13)
+        self.dtln_warn_cb_rect = pygame.Rect(SCREEN_W//2 - 110, SCREEN_H//2 + 16, 18, 18)
 
         # ── TEST FILE PICKER ───────────────────────────────────────────────
         self.tp_btn_back = Button((SCREEN_W - 88, 7, 78, 32),
@@ -142,6 +175,12 @@ class SamplerApp(WorkersMixin, HandlersMixin, ScreensMixin):
         self.rec_btn_stop = Button((SCREEN_W//2 - 75, SCREEN_H - 65, 150, 48),
                                    "Stop", RED, WHITE, bold=True)
         self.rec_vu_rect  = pygame.Rect(PAD, HEADER_H + 100, SCREEN_W - PAD*2, 14)
+
+        # ── PRE-RECORD ────────────────────────────────────────────────────
+        self.pr_btn_back   = Button((SCREEN_W - 90, 7, 80, 32),
+                                    "Back", MID, WHITE, fsize=14)
+        self.pr_btn_record = Button((SCREEN_W//2 - 75, SCREEN_H - 65, 150, 48),
+                                    "Record", RED, WHITE, bold=True)
 
         # ── PROCESSING ────────────────────────────────────────────────────
         self._spin_angle = 0
@@ -163,26 +202,37 @@ class SamplerApp(WorkersMixin, HandlersMixin, ScreensMixin):
         # ── BROWSER — folder list ──────────────────────────────────────────
         self.br_btn_back = Button((SCREEN_W - 90, 7, 80, 32),
                                   "Back", MID, WHITE, fsize=14)
-        self.br_btn_up   = Button((SCREEN_W - 44, HEADER_H + 4,  34, 34),
+        self.br_btn_up   = Button((SCREEN_W - 44, HEADER_H + 4,  34, 56),
                                   "▲", DARK_MID, WHITE)
-        self.br_btn_dn   = Button((SCREEN_W - 44, HEADER_H + 44, 34, 34),
+        self.br_btn_dn   = Button((SCREEN_W - 44, HEADER_H + 66, 34, 56),
                                   "▼", DARK_MID, WHITE)
+        self.br_btn_open   = Button((PAD,          SCREEN_H - 50, 140, 38), 
+                                  "Open",   ACCENT, BLACK, bold=True)
+        self.br_btn_delete = Button((PAD + 148,    SCREEN_H - 50, 140, 38),
+                                  "Delete", RED,    WHITE, bold=True)
 
         # ── BROWSER FILES — file list inside a folder ──────────────────────
         self.brf_btn_back = Button((SCREEN_W - 90, 7, 80, 32),
                                    "Back", MID, WHITE, fsize=14)
-        self.brf_btn_up   = Button((SCREEN_W - 44, HEADER_H + 4,  34, 34),
+        self.brf_btn_up   = Button((SCREEN_W - 44, HEADER_H + 4,  34, 56),
                                    "▲", DARK_MID, WHITE)
-        self.brf_btn_dn   = Button((SCREEN_W - 44, HEADER_H + 44, 34, 34),
+        self.brf_btn_dn   = Button((SCREEN_W - 44, HEADER_H + 66, 34, 56),
                                    "▼", DARK_MID, WHITE)
         self.brf_waveform = WaveformWidget(
-            (PAD, SCREEN_H - 92, SCREEN_W - PAD*2, 38))
-        self.brf_btn_play = Button((PAD,          SCREEN_H - 60, 100, 36),
+            (PAD, SCREEN_H - 78, SCREEN_W - PAD*2, 38))
+        self.brf_btn_play = Button((PAD,          SCREEN_H - 36, 100, 34),
                                    "▶ Play", GREEN, BLACK, bold=True)
-        self.brf_btn_midi = Button((PAD + 108,    SCREEN_H - 60, 120, 36),
+        self.brf_btn_midi = Button((PAD + 108,    SCREEN_H - 36, 100, 34),
                                    "MIDI", ACCENT, BLACK, bold=True)
-        self.brf_vel_toggle = Toggle(PAD, SCREEN_H - 26,
+        self.brf_vel_toggle = Toggle(PAD, SCREEN_H - 100,
                                      "Fix velocity")
+        self.brf_btn_delete = Button((PAD + 236,   SCREEN_H - 36, 100, 34),
+                                     "Delete", RED, WHITE, bold=True)
+        
+        self.cont_btn_yes = Button((SCREEN_W//2 - 110, SCREEN_H//2 + 20, 100, 40),
+                                   "Yes", ACCENT, BLACK, bold=True, fsize=13)
+        self.cont_btn_no  = Button((SCREEN_W//2 + 10,  SCREEN_H//2 + 20, 100, 40),
+                                   "No", RED, WHITE, bold=True, fsize=13)
 
         # ── MIDI PLAY ─────────────────────────────────────────────────────
         self.midi_waveform = WaveformWidget(
@@ -221,6 +271,9 @@ class SamplerApp(WorkersMixin, HandlersMixin, ScreensMixin):
                          args=(self._use_dtln,), daemon=True).start()
 
     def _start_recording(self):
+        self._go('pre_record')
+
+    def _begin_recording(self):
         self._recording        = True
         self._stop_record_flag = threading.Event()
         self._go('recording')
@@ -234,6 +287,7 @@ class SamplerApp(WorkersMixin, HandlersMixin, ScreensMixin):
         self._browser_folders       = []
         self._browser_folder_scroll = 0
         self._browser_sel_folder    = None
+        self._browser_sel_folder_idx = None
 
         if os.path.exists(SAMPLES_DIR):
             self._browser_folders = sorted(

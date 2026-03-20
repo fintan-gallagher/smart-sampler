@@ -49,8 +49,8 @@ class AudioClassifier:
             reader = csv.DictReader(f)
             self._class_names = [row["display_name"] for row in reader]
     
-    def classify(self, audio: np.ndarray, sr: int, 
-                 top_k: int = 3) -> list[tuple[str, float]]:
+    def classify(self, audio: np.ndarray, sr: int, original_dbfs: float | None = None,
+                 top_k: int = 6) -> list[tuple[str, float]]:
         """
         Classify audio using YAMNet.
         
@@ -101,5 +101,30 @@ class AudioClassifier:
              float(mean_scores[i]))
             for i in top_indices
         ]
+
+        predictions = [
+            (self._class_names[i] if i < len(self._class_names) else "unknown",
+             float(mean_scores[i]))
+            for i in top_indices
+        ]
+
+        # ── Ambience injection ─────────────────────────────────────────────
+        RMS_THRESHOLD_DBFS = -30.0
+        CONF_THRESHOLD     = 0.70
+
+        # Use pre-normalisation level if provided, otherwise measure the waveform
+        if original_dbfs is not None:
+            dbfs = original_dbfs
+        else:
+            rms  = float(np.sqrt(np.mean(waveform ** 2)))
+            dbfs = 20 * np.log10(rms) if rms > 0 else -120.0
+
+        top_confidence = predictions[0][1] if predictions else 1.0
+        print(f"[Ambience check] dBFS={dbfs:.1f}  top_conf={top_confidence:.3f}  "
+              f"threshold_dbfs={RMS_THRESHOLD_DBFS}  threshold_conf={CONF_THRESHOLD}")
+
+        if dbfs < RMS_THRESHOLD_DBFS and top_confidence < CONF_THRESHOLD:
+            predictions = [("Ambience", 1.0)] + predictions[:top_k - 1]
+
         
         return predictions

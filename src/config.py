@@ -33,7 +33,7 @@ PITCH_FMAX = 'C7'  # Highest detectable pitch (~2093 Hz)
 TRANSPOSE_THRESHOLD = 0.5  # Semitones - skip if already close to target
 
 # === TEST MODE ===
-TEST_MODE = True  # Set to False when microphone is available
+TEST_MODE = False  # Set to False when microphone is available
 TEST_AUDIO_PATH = os.path.join(TEST_SAMPLES_DIR, 'test_input.wav')
 
 # === FILENAMES ===

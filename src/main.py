@@ -89,7 +89,9 @@ class SmartSampler:
         # 5. Classify (before pitch shift for accuracy)
         mono_mix = self._to_mono(audio)
         audio_for_classification = librosa.resample(mono_mix, orig_sr=sr, target_sr=16000) if sr != 16000 else mono_mix
-        predictions = self.classifier.classify(audio_for_classification, 16000)
+        predictions = self.classifier.classify(
+            audio_for_classification, 16000,
+            original_dbfs=norm_stats['original_dbfs'])
         
         # 6. Detect pitch
         detected_pitch, pitch_stats = self.pitch_detector.detect(mono_mix, sr)

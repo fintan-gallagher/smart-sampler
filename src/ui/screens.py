@@ -6,6 +6,7 @@ import os
 
 import numpy as np
 import pygame
+from pygame.gfxdraw import box
 
 from ..config import TEST_MODE, SAMPLES_DIR
 from .theme import (
@@ -25,6 +26,7 @@ class ScreensMixin:
         s = self._state
 
         if   s == 'home':           self._draw_home()
+        elif s == 'pre_record':     self._draw_pre_record()
         elif s == 'test_pick':      self._draw_test_pick()
         elif s == 'recording':      self._draw_recording()
         elif s == 'processing':     self._draw_processing()
@@ -33,6 +35,9 @@ class ScreensMixin:
         elif s == 'browser':        self._draw_browser()
         elif s == 'browser_files':  self._draw_browser_files()
         elif s == 'midi_play':      self._draw_midi_play()
+
+        if self._confirm_delete:    self._draw_confirm_overlay()
+        if self._dtln_warning:       self._draw_dtln_warning_overlay()
 
         draw_status(self.screen, self._status, self._status_col)
 
@@ -49,6 +54,18 @@ class ScreensMixin:
         col  = ORANGE if TEST_MODE else GREEN
         t    = font(12).render(mode, True, col)
         self.screen.blit(t, (PAD, HEADER_H + 4))
+
+        # ── PRE-RECORD ────────────────────────────────────────────────────────
+    def _draw_pre_record(self):
+        draw_header(self.screen, "Record Sample")
+        self.pr_btn_back.draw(self.screen)
+
+        hint1 = font(15).render("Press Record when ready.", True, WHITE)
+        hint2 = font(13).render("Recording will begin immediately.", True, GREY)
+        self.screen.blit(hint1, hint1.get_rect(center=(SCREEN_W // 2, SCREEN_H // 2 - 30)))
+        self.screen.blit(hint2, hint2.get_rect(center=(SCREEN_W // 2, SCREEN_H // 2)))
+
+        self.pr_btn_record.draw(self.screen)
 
     # ── TEST FILE PICKER ──────────────────────────────────────────────────
     def _draw_test_pick(self):
@@ -174,9 +191,11 @@ class ScreensMixin:
                 idx  = self._browser_folder_scroll + i
                 name = self._browser_folders[idx]
                 y    = HEADER_H + 4 + i * ITEM_H
+                sel = (idx == self._browser_sel_folder_idx)
+                bg = ACCENT_DIM if sel else DARK_MID
 
-                pygame.draw.rect(self.screen, DARK_MID,
-                                 (PAD, y, SCREEN_W - 50, ITEM_H - 3),
+                pygame.draw.rect(self.screen, bg,
+                                 (PAD, y, SCREEN_W - 54, ITEM_H - 3),
                                  border_radius=5)
 
                 icon = font(15).render("📁", True, YELLOW)
@@ -191,6 +210,10 @@ class ScreensMixin:
                 self.screen.blit(count_t,
                                  (SCREEN_W - 55 - count_t.get_width(),
                                   y + (ITEM_H - 3 - count_t.get_height()) // 2))
+            
+        if self._browser_sel_folder_idx is not None:
+            self.br_btn_open.draw(self.screen)
+            self.br_btn_delete.draw(self.screen)
 
     # ── BROWSER FILES — file list inside folder ────────────────────────────
     def _draw_browser_files(self):
@@ -214,7 +237,7 @@ class ScreensMixin:
                 sel     = (idx == self._browser_sel)
                 bg      = ACCENT_DIM if sel else DARK_MID
                 pygame.draw.rect(self.screen, bg,
-                                 (PAD, y, SCREEN_W - 50, ITEM_H - 3),
+                                 (PAD, y, SCREEN_W - 54, ITEM_H - 3),
                                  border_radius=5)
                 t = font(13, bold=sel).render(name, True, WHITE)
                 self.screen.blit(t, (PAD + 6, y + (ITEM_H - 3 - t.get_height()) // 2))
@@ -223,6 +246,7 @@ class ScreensMixin:
             self.brf_waveform.draw(self.screen, self._browser_audio)
             self.brf_btn_play.draw(self.screen)
             self.brf_btn_midi.draw(self.screen)
+            self.brf_btn_delete.draw(self.screen)
             self.brf_vel_toggle.draw(self.screen)
 
             if pygame.mixer.get_init() and pygame.mixer.music.get_busy():
@@ -272,3 +296,60 @@ class ScreensMixin:
                 center=(SCREEN_W // 2, HEADER_H + 158)))
 
         self.midi_btn_stop.draw(self.screen)
+
+        # ── DELETE CONFIRMATION OVERLAY ─────────────────────────────────────────────────────────
+    def _draw_confirm_overlay(self):
+        # Dim the background
+        overlay = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180))
+        self.screen.blit(overlay, (0, 0))
+
+        # Dialog box
+        box = pygame.Rect(PAD, SCREEN_H // 2 - 52, SCREEN_W - PAD * 2, 120)
+        pygame.draw.rect(self.screen, DARK_MID, box, border_radius=8)
+        pygame.draw.rect(self.screen, RED, box, width=2, border_radius=8)
+
+        name = self._confirm_delete.get('name', '')
+        line1 = font(14, bold=True).render("Are you sure you want to delete:", True, WHITE)
+        line2 = font(13).render(f'"{name}"', True, YELLOW)
+        self.screen.blit(line1, line1.get_rect(centerx=SCREEN_W // 2, top=box.top + 10))
+        self.screen.blit(line2, line2.get_rect(centerx=SCREEN_W // 2, top=box.top + 30))
+
+        self.cont_btn_yes.draw(self.screen)
+        self.cont_btn_no.draw(self.screen)
+
+    # ── DTLN WARNING OVERLAY ──────────────────────────────────────────────
+    def _draw_dtln_warning_overlay(self):
+        overlay = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180))
+        self.screen.blit(overlay, (0, 0))
+
+        box = pygame.Rect(PAD, SCREEN_H // 2 - 80, SCREEN_W - PAD * 2, 160)
+        pygame.draw.rect(self.screen, DARK_MID, box, border_radius=8)
+        pygame.draw.rect(self.screen, YELLOW, box, width=2, border_radius=8)
+
+        lines = [
+            ("DTLN Noise Removal", True,  14, YELLOW, box.top + 10),
+            ("DTLN removes background noise",  False, 12, WHITE,  box.top + 32),
+            ("and works best with vocal",      False, 12, WHITE,  box.top + 48),
+            ("samples only. Non-vocal samples",False, 12, WHITE,  box.top + 64),
+            ("may sound degraded.",            False, 12, WHITE,   box.top + 80),
+        ]
+        for text, bold, size, col, y in lines:
+            t = font(size, bold).render(text, True, col)
+            self.screen.blit(t, t.get_rect(centerx=SCREEN_W // 2, top=y))
+
+        # Checkbox
+        cb = self.dtln_warn_cb_rect
+        pygame.draw.rect(self.screen, DARK_MID, cb, border_radius=3)
+        pygame.draw.rect(self.screen, WHITE, cb, width=1, border_radius=3)
+        if self._dtln_warn_no_show:
+            pygame.draw.line(self.screen, GREEN,
+                             (cb.left + 3, cb.centery), (cb.centerx - 1, cb.bottom - 4), 2)
+            pygame.draw.line(self.screen, GREEN,
+                             (cb.centerx - 1, cb.bottom - 4), (cb.right - 3, cb.top + 4), 2)
+        lbl = font(12).render("Don't show this again", True, GREY)
+        self.screen.blit(lbl, (cb.right + 6, cb.centery - lbl.get_height() // 2))
+
+        self.dtln_btn_ok.draw(self.screen)
+        self.dtln_btn_cancel.draw(self.screen)
