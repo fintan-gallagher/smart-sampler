@@ -50,11 +50,6 @@ class ScreensMixin:
         self.h_dtln_toggle.draw(self.screen)
         self.h_btn_quit.draw(self.screen)
 
-        # The MIDI Browse button always opens the sample browser in MIDI mode
-        # and starts the engine in the background — it is an entry point, not
-        # a toggle.  The engine is always off when the user is on the home
-        # screen (Back from the MIDI browser stops it), so there is no state
-        # to reflect here.
         self.h_btn_midi.bg    = ACCENT
         self.h_btn_midi.fg    = BLACK
         self.h_btn_midi.label = "MIDI Browse"
@@ -185,11 +180,6 @@ class ScreensMixin:
 
     # ── BROWSER — folder list ──────────────────────────────────────────────
     def _draw_browser(self):
-        # ── Header & engine status bar (MIDI mode only) ──────────────────
-        # In MIDI mode a one-line status strip sits between the header and
-        # the folder list.  This shifts the list down by STATUS_H pixels and
-        # reduces the visible row count by one so nothing overflows.
-        # In normal mode layout is unchanged.
         if self._midi_browser_mode:
             draw_header(self.screen, "MIDI Browse")
             # Engine status: starting (yellow) / ready (green) / error (red).

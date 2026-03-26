@@ -94,14 +94,6 @@ class WorkersMixin:
         self._go_home()
 
     def _midi_launch_worker(self, sfz_path: str | None):
-        """Start sfizz_jack as a persistent JACK client.
-
-        sfz_path is now optional.  When None, sfizz_jack launches with no
-        initial instrument loaded — subsequent 'load_instrument <path>'
-        commands sent over stdin will hot-swap samples without restarting.
-        When a path is provided (legacy midi_play flow) it is appended to the
-        command as before.
-        """
         try:
             uid         = os.getuid()
             runtime_dir = f'/run/user/{uid}'
