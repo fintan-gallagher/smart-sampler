@@ -44,10 +44,28 @@ class HandlersMixin:
             self._go('home')   # _go not _go_home so status isn't cleared
             return
         if ev.type == EV_MIDI_READY:
-            self._midi_status = "Keyboard active — play away!"
+            # Engine is up and MIDI keyboard is connected.
+            # Mark the engine as active so the home button turns green and
+            # browser_files shows the MIDI indicator.
+            self._midi_status         = "Keyboard active — play away!"
+            self._midi_engine_active  = True
+            self._midi_engine_loading = False
+
+            # If the user clicked the MIDI button in browser_files while the
+            # engine was still starting (or off), _midi_autoload was set.
+            # Now that the engine is ready, load that sample immediately.
+            if self._midi_autoload:
+                self._midi_autoload = False
+                self._load_sample_into_engine()
             return
+
         if ev.type == EV_MIDI_ERR:
-            self._midi_status = f"Error: {ev.dict.get('msg', 'Unknown')}"
+            # Startup failed — reset all engine flags so the button goes back
+            # to its dimmed 'off' state and the user can try again.
+            self._midi_status         = f"Error: {ev.dict.get('msg', 'Unknown')}"
+            self._midi_engine_active  = False
+            self._midi_engine_loading = False
+            self._midi_autoload       = False
             return
 
         # ── global quit ────────────────────────────────────────────────
@@ -107,6 +125,13 @@ class HandlersMixin:
                 self._start_test_pick()
             if self.h_btn_browse.handle(ev):
                 self._open_browser()
+            if self.h_btn_midi.handle(ev):
+                # Navigate to the sample browser in MIDI mode.
+                # The engine starts in the background while the user browses
+                # folders.  Pressing Back from the folder list stops the engine
+                # and returns here.  _enter_midi_browse() handles stopping any
+                # stale engine instance before starting a fresh one.
+                self._enter_midi_browse()
             if self.h_dtln_toggle.handle(ev):
                 if self.h_dtln_toggle.value and not self._prefs.get('dtln_warn_dismissed'):
                     # undo the flip — overlay will confirm it
@@ -168,15 +193,23 @@ class HandlersMixin:
                     self._status = "Saving..." 
                     self._status_col = YELLOW
                     threading.Thread(target=self._save_worker,
-                                    args=(lbl,), daemon=True).start()
+                                    args=(lbl,self.lbl_loop_toggle.value), 
+                                    daemon=True).start()
                     return
             if self.lbl_btn_back.handle(ev):
                 self._go('review')
+            self.lbl_loop_toggle.handle(ev)
 
         # ── BROWSER — folder list ──────────────────────────────────────
         elif s == 'browser':
             if self.br_btn_back.handle(ev):
-                self._go_home()
+                if self._midi_browser_mode:
+                    # Leaving MIDI mode: tear down the engine before going home.
+                    # _exit_midi_browse() clears _midi_browser_mode, stops sfizz,
+                    # and calls _go_home() — all in one step.
+                    self._exit_midi_browse()
+                else:
+                    self._go_home()
             if self.br_btn_up.handle(ev):
                 self._browser_folder_scroll = max(0, self._browser_folder_scroll - 1)
                 self._browser_sel_folder_idx = None
@@ -198,8 +231,14 @@ class HandlersMixin:
                     }
             if ev.type == pygame.MOUSEBUTTONUP:
                 ITEM_H = 48
-                for i in range(min(5, len(self._browser_folders) - self._browser_folder_scroll)):
-                    row = pygame.Rect(PAD, HEADER_H + 4 + i * ITEM_H,
+                # In MIDI mode the engine-status line above the folder list
+                # shifts every row down by STATUS_H pixels.  The hit-rects
+                # must use the same offset as the draw code or clicks land on
+                # the wrong (invisible) position and require multiple taps.
+                STATUS_H = 18 if self._midi_browser_mode else 0
+                VISIBLE  = 4  if self._midi_browser_mode else 5
+                for i in range(min(VISIBLE, len(self._browser_folders) - self._browser_folder_scroll)):
+                    row = pygame.Rect(PAD, HEADER_H + 4 + STATUS_H + i * ITEM_H,
                                       SCREEN_W - 54, ITEM_H - 3)
                     if row.collidepoint(ev.pos):
                         self._browser_sel_folder_idx = self._browser_folder_scroll + i
@@ -226,7 +265,12 @@ class HandlersMixin:
                         'path':   path,
                         'name':   name,
                     }
-            self.brf_vel_toggle.handle(ev)
+            if self.brf_vel_toggle.handle(ev):
+                # If the engine is already running, re-generate the SFZ with
+                # the new velocity mode and hot-swap it in immediately so the
+                # user hears the change without touching any other button.
+                if self._midi_engine_active and self._browser_sel is not None:
+                    self._load_sample_into_engine()
             if ev.type == pygame.MOUSEBUTTONUP:
                 ITEM_H = 38
                 for i in range(min(5, len(self._browser_files) - self._browser_scroll)):
@@ -236,6 +280,13 @@ class HandlersMixin:
                         self._browser_sel   = self._browser_scroll + i
                         self._browser_audio = None
                         self._load_browser_waveform()
+                        if self._midi_browser_mode:
+                            # MIDI mode: every tap immediately loads the sample.
+                            # _go_midi_play() handles whichever engine state we're in:
+                            #   active  → instant hot-swap via load_instrument stdin cmd
+                            #   loading → sets _midi_autoload; fires on EV_MIDI_READY
+                            #   off     → starts engine + sets _midi_autoload (edge case)
+                            self._go_midi_play()
                         break
 
         # ── MIDI PLAY ─────────────────────────────────────────────────

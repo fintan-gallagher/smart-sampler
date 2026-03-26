@@ -55,20 +55,26 @@ class Button:
 
 class Toggle:
     """Simple ON/OFF pill toggle."""
-    def __init__(self, x, y, label, value=False):
-        self.rect  = pygame.Rect(x, y, 54, 28)
-        self.label = label
-        self.value = value
+    def __init__(self, x, y, label, value=False, w=54, h=28, label_left=False):
+        self.rect       = pygame.Rect(x, y, w, h)
+        self.label      = label
+        self.value      = value
+        self.label_left = label_left
 
     def draw(self, surf):
         track = GREEN if self.value else DARK_MID
-        pygame.draw.rect(surf, track, self.rect, border_radius=14)
-        pygame.draw.rect(surf, WHITE, self.rect, width=1, border_radius=14)
-        kx = self.rect.right - 18 if self.value else self.rect.left + 4
-        pygame.draw.circle(surf, WHITE, (kx + 10, self.rect.centery), 10)
+        pygame.draw.rect(surf, track, self.rect, border_radius=self.rect.height // 2)
+        pygame.draw.rect(surf, WHITE, self.rect, width=1, border_radius=self.rect.height // 2)
+        knob_r = self.rect.height // 2 - 2
+        kx = self.rect.right - knob_r - 4 if self.value else self.rect.left + knob_r + 4
+        pygame.draw.circle(surf, WHITE, (kx, self.rect.centery), knob_r)
         lbl = font(14).render(self.label, True, WHITE)
-        surf.blit(lbl, (self.rect.right + 8,
-                        self.rect.centery - lbl.get_height() // 2))
+        if self.label_left:
+            surf.blit(lbl, (self.rect.left - lbl.get_width() - 8,
+                            self.rect.centery - lbl.get_height() // 2))
+        else:
+            surf.blit(lbl, (self.rect.right + 8,
+                            self.rect.centery - lbl.get_height() // 2))
 
     def handle(self, ev) -> bool:
         if ev.type == pygame.MOUSEBUTTONUP and self.rect.collidepoint(ev.pos):

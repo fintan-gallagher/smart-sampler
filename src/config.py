@@ -4,8 +4,11 @@ import os
 # === PATHS ===
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODEL_PATH = os.path.join(BASE_DIR, 'models', 'yamnet_model')
-SAMPLES_DIR = os.path.join(BASE_DIR, 'samples')
-TEST_SAMPLES_DIR = os.path.join(BASE_DIR, 'test_samples')
+_USB_MOUNT  = '/media/fintanpi/INTENSO'
+_USB_PATH   = _USB_MOUNT + '/smart_sampler_samples'
+SAMPLES_DIR = _USB_PATH if os.path.ismount(_USB_MOUNT) else os.path.join(BASE_DIR, 'samples')
+IMPORT_DIR  = (_USB_MOUNT + '/imported_samples') if os.path.ismount(_USB_MOUNT) else os.path.join(BASE_DIR, 'imported_samples')
+TEST_SAMPLES_DIR = IMPORT_DIR
 
 # === AUDIO SETTINGS ===
 SAMPLE_RATE = 16000
@@ -34,7 +37,7 @@ TRANSPOSE_THRESHOLD = 0.5  # Semitones - skip if already close to target
 
 # === TEST MODE ===
 TEST_MODE = False  # Set to False when microphone is available
-TEST_AUDIO_PATH = os.path.join(TEST_SAMPLES_DIR, 'test_input.wav')
+TEST_AUDIO_PATH = os.path.join(IMPORT_DIR, 'placeholder.wav')
 
 # === FILENAMES ===
 RAW_FILENAME = 'sample_raw.wav'

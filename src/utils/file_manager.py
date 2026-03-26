@@ -38,7 +38,7 @@ class FileManager:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
         if target_pitch:
-            note_name = librosa.hz_to_note(target_pitch).replace('#', 'sharp')
+            note_name = librosa.hz_to_note(target_pitch).replace('♯', '#').replace('♭', 'b')
             clean_name = f"{label}_{timestamp}_CLEAN_{note_name}.wav"
         else:
             clean_name = f"{label}_{timestamp}_CLEAN_UNPITCHED.wav"

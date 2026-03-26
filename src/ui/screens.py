@@ -50,6 +50,16 @@ class ScreensMixin:
         self.h_dtln_toggle.draw(self.screen)
         self.h_btn_quit.draw(self.screen)
 
+        # The MIDI Browse button always opens the sample browser in MIDI mode
+        # and starts the engine in the background — it is an entry point, not
+        # a toggle.  The engine is always off when the user is on the home
+        # screen (Back from the MIDI browser stops it), so there is no state
+        # to reflect here.
+        self.h_btn_midi.bg    = ACCENT
+        self.h_btn_midi.fg    = BLACK
+        self.h_btn_midi.label = "MIDI Browse"
+        self.h_btn_midi.draw(self.screen)
+
         mode = "TEST MODE" if TEST_MODE else "LIVE MODE"
         col  = ORANGE if TEST_MODE else GREEN
         t    = font(12).render(mode, True, col)
@@ -69,7 +79,7 @@ class ScreensMixin:
 
     # ── TEST FILE PICKER ──────────────────────────────────────────────────
     def _draw_test_pick(self):
-        draw_header(self.screen, "Select Test File")
+        draw_header(self.screen, "Imported Samples")
         self.tp_btn_back.draw(self.screen)
 
         ITEM_H   = 38
@@ -169,18 +179,41 @@ class ScreensMixin:
         for btn, _ in self.lbl_buttons:
             btn.draw(self.screen)
         self.lbl_btn_back.draw(self.screen)
+        self.lbl_loop_toggle.draw(self.screen) 
         hint = font(12).render("Tap a YAMNet prediction to save", True, GREY)
         self.screen.blit(hint, (PAD, SCREEN_H - 20))
 
     # ── BROWSER — folder list ──────────────────────────────────────────────
     def _draw_browser(self):
-        draw_header(self.screen, "Sample Browser")
+        # ── Header & engine status bar (MIDI mode only) ──────────────────
+        # In MIDI mode a one-line status strip sits between the header and
+        # the folder list.  This shifts the list down by STATUS_H pixels and
+        # reduces the visible row count by one so nothing overflows.
+        # In normal mode layout is unchanged.
+        if self._midi_browser_mode:
+            draw_header(self.screen, "MIDI Browse")
+            # Engine status: starting (yellow) / ready (green) / error (red).
+            # This is the only feedback the user gets that the engine launched.
+            if self._midi_engine_loading:
+                st_col, st_txt = YELLOW, "Engine starting — choose a folder while you wait…"
+            elif self._midi_engine_active:
+                st_col, st_txt = GREEN,  "Engine ready  ●  open a folder and tap a sample"
+            else:
+                st_col, st_txt = RED,    "Engine error — try going back and pressing MIDI Browse again"
+            st = font(11).render(st_txt, True, st_col)
+            self.screen.blit(st, (PAD, HEADER_H + 4))
+            STATUS_H = 18   # pixels reserved for the status line
+            VISIBLE  = 4    # one fewer row to compensate
+        else:
+            draw_header(self.screen, "Sample Browser")
+            STATUS_H = 0
+            VISIBLE  = 5
+
         self.br_btn_back.draw(self.screen)
         self.br_btn_up.draw(self.screen)
         self.br_btn_dn.draw(self.screen)
 
-        ITEM_H  = 48
-        VISIBLE = 5
+        ITEM_H = 48
 
         if not self._browser_folders:
             t = font(15).render("No sample folders found.", True, GREY)
@@ -190,9 +223,10 @@ class ScreensMixin:
                                len(self._browser_folders) - self._browser_folder_scroll)):
                 idx  = self._browser_folder_scroll + i
                 name = self._browser_folders[idx]
-                y    = HEADER_H + 4 + i * ITEM_H
-                sel = (idx == self._browser_sel_folder_idx)
-                bg = ACCENT_DIM if sel else DARK_MID
+                # STATUS_H shifts every row down past the engine-status line.
+                y    = HEADER_H + 4 + STATUS_H + i * ITEM_H
+                sel  = (idx == self._browser_sel_folder_idx)
+                bg   = ACCENT_DIM if sel else DARK_MID
 
                 pygame.draw.rect(self.screen, bg,
                                  (PAD, y, SCREEN_W - 54, ITEM_H - 3),
@@ -210,14 +244,22 @@ class ScreensMixin:
                 self.screen.blit(count_t,
                                  (SCREEN_W - 55 - count_t.get_width(),
                                   y + (ITEM_H - 3 - count_t.get_height()) // 2))
-            
+
         if self._browser_sel_folder_idx is not None:
             self.br_btn_open.draw(self.screen)
-            self.br_btn_delete.draw(self.screen)
+            # Delete is suppressed in MIDI mode — no reason to delete folders
+            # mid-session, and keeping the button out reduces accident risk.
+            if not self._midi_browser_mode:
+                self.br_btn_delete.draw(self.screen)
 
     # ── BROWSER FILES — file list inside folder ────────────────────────────
     def _draw_browser_files(self):
-        draw_header(self.screen, f"📁 {self._browser_sel_folder or ''}")
+        # In MIDI mode the header gets a green dot prefix so it's obvious the
+        # engine is running and this isn't a regular browse session.
+        if self._midi_browser_mode:
+            draw_header(self.screen, f"MIDI ● {self._browser_sel_folder or ''}")
+        else:
+            draw_header(self.screen, f"📁 {self._browser_sel_folder or ''}")
         self.brf_btn_back.draw(self.screen)
         self.brf_btn_up.draw(self.screen)
         self.brf_btn_dn.draw(self.screen)
@@ -235,17 +277,73 @@ class ScreensMixin:
                 name, _ = self._browser_files[idx]
                 y       = HEADER_H + 4 + i * ITEM_H
                 sel     = (idx == self._browser_sel)
-                bg      = ACCENT_DIM if sel else DARK_MID
+                # In MIDI mode the selected (= currently loaded) row is green
+                # so the user can see at a glance which sample is playing.
+                # In normal browse mode the selected row stays amber (ACCENT_DIM).
+                if self._midi_browser_mode and sel:
+                    bg = GREEN
+                elif sel:
+                    bg = ACCENT_DIM
+                else:
+                    bg = DARK_MID
                 pygame.draw.rect(self.screen, bg,
                                  (PAD, y, SCREEN_W - 54, ITEM_H - 3),
                                  border_radius=5)
-                t = font(13, bold=sel).render(name, True, WHITE)
+                # Use black text on green so contrast stays readable.
+                fg = BLACK if (self._midi_browser_mode and sel) else WHITE
+                t = font(13, bold=sel).render(name, True, fg)
                 self.screen.blit(t, (PAD + 6, y + (ITEM_H - 3 - t.get_height()) // 2))
 
         if self._browser_sel is not None:
+            # ── MIDI status indicator (above waveform) ───────────────────
+            # In normal mode: shown only while the engine is active.
+            # In MIDI mode: always shown so the user knows the engine state
+            # (starting… / loaded filename / error).
+            if self._midi_browser_mode:
+                if self._midi_engine_loading:
+                    ind_col, ind_txt = YELLOW, "● Engine starting — sample will load when ready"
+                elif self._midi_engine_active:
+                    sfz_name = os.path.basename(self._midi_live_sfz) if self._midi_live_sfz else "—"
+                    if len(sfz_name) > 32:
+                        sfz_name = sfz_name[:30] + "…"
+                    ind_col, ind_txt = GREEN, f"● Loaded: {sfz_name}"
+                else:
+                    ind_col, ind_txt = RED, "● Engine not running"
+                ind = font(11).render(ind_txt, True, ind_col)
+                self.screen.blit(ind, (PAD, SCREEN_H - 92))
+            elif self._midi_engine_active:
+                # Normal mode legacy indicator.
+                sfz_name = os.path.basename(self._midi_live_sfz) if self._midi_live_sfz else "no sample loaded"
+                if len(sfz_name) > 32:
+                    sfz_name = sfz_name[:30] + "…"
+                ind = font(11).render(f"● MIDI: {sfz_name}", True, GREEN)
+                self.screen.blit(ind, (PAD, SCREEN_H - 92))
+
             self.brf_waveform.draw(self.screen, self._browser_audio)
             self.brf_btn_play.draw(self.screen)
-            self.brf_btn_midi.draw(self.screen)
+
+            if self._midi_browser_mode:
+                # The MIDI button is replaced by a plain hint — tapping the
+                # file row itself is the load action in MIDI mode.
+                # The hint sits in the same horizontal slot the MIDI button
+                # normally occupies so the layout feels balanced.
+                hint = font(12).render("tap row to load", True, GREY)
+                self.screen.blit(hint, hint.get_rect(
+                    center=(PAD + 108 + 50, self.brf_btn_play.rect.centery)))
+            else:
+                # Normal mode: update MIDI button appearance to reflect engine state.
+                # Green + "Load MIDI" when engine is active (hot-swap).
+                # Amber + "MIDI" when engine is off (will start + load).
+                if self._midi_engine_active:
+                    self.brf_btn_midi.bg    = GREEN
+                    self.brf_btn_midi.fg    = BLACK
+                    self.brf_btn_midi.label = "Load MIDI"
+                else:
+                    self.brf_btn_midi.bg    = ACCENT
+                    self.brf_btn_midi.fg    = BLACK
+                    self.brf_btn_midi.label = "MIDI"
+                self.brf_btn_midi.draw(self.screen)
+
             self.brf_btn_delete.draw(self.screen)
             self.brf_vel_toggle.draw(self.screen)
 

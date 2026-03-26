@@ -72,7 +72,7 @@ class WorkersMixin:
             pygame.event.post(pygame.event.Event(
                 EV_PROCESS_ERR, {'msg': str(e)}))
 
-    def _save_worker(self, label: str):
+    def _save_worker(self, label: str, loop: bool = True):
         results = self._results
 
         def gen_spectrogram(path):
@@ -82,7 +82,8 @@ class WorkersMixin:
 
         def gen_sfz(path, audio_filename):
             self.sampler.sfz_generator.save(
-                path, audio_filename, results['detected_pitch'], label)
+                path, audio_filename, results['detected_pitch'], label,
+                fixed_velocity=self.brf_vel_toggle.value, loop=loop)
 
         self.sampler.file_manager.save_with_label(
             CLEAN_FILENAME, RAW_FILENAME, label,
@@ -92,7 +93,15 @@ class WorkersMixin:
         self._status_col = (0, 200, 80)   # GREEN — avoids circular theme import
         self._go_home()
 
-    def _midi_launch_worker(self, sfz_path: str):
+    def _midi_launch_worker(self, sfz_path: str | None):
+        """Start sfizz_jack as a persistent JACK client.
+
+        sfz_path is now optional.  When None, sfizz_jack launches with no
+        initial instrument loaded — subsequent 'load_instrument <path>'
+        commands sent over stdin will hot-swap samples without restarting.
+        When a path is provided (legacy midi_play flow) it is appended to the
+        command as before.
+        """
         try:
             uid         = os.getuid()
             runtime_dir = f'/run/user/{uid}'
@@ -115,13 +124,20 @@ class WorkersMixin:
                 time.sleep(0.2)
             time.sleep(0.5)
 
+            # Build the command.  The SFZ path is the only positional argument
+            # and is optional per the sfizz_jack man page — omitting it lets
+            # the engine start idle, ready to receive load_instrument commands.
+            cmd = ['pw-jack', SFIZZ_BINARY, '--jack_autoconnect=true']
+            if sfz_path:
+                cmd.append(sfz_path)
+
             last_err = None
             for attempt in range(2):          # retry once on failure
                 if attempt > 0:
                     time.sleep(2.0)
 
                 self._sfizz_proc = subprocess.Popen(
-                    ['pw-jack', SFIZZ_BINARY, '--jack_autoconnect=true', sfz_path],
+                    cmd,
                     env=env,
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,

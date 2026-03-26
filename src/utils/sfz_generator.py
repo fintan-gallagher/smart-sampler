@@ -18,7 +18,7 @@ class SFZGenerator:
     
     def generate(self, audio_filename: str, detected_pitch: float | None, 
                  label: str, audio_path: str | None = None,
-                 fixed_velocity: bool =False) -> str:
+                 fixed_velocity: bool =False, loop: bool = True) -> str:
         """
         Generate SFZ metadata for a sample.
         
@@ -51,9 +51,22 @@ class SFZGenerator:
             vel_lines = "lovel=0\nhivel=127\namp_veltrack=0"
         else:
             vel_lines = "lovel=0\nhivel=127"
-        
+
+        if loop:
+            loop_section = (
+                "// Loop settings — sustain loop while key is held\n"
+                "loop_mode=loop_sustain\n"
+                "loop_start=0\n"
+                f"{loop_end_line}"
+            )
+        else:
+            loop_section = "// No loop — one-shot playback\nloop_mode=one_shot"
+
         sfz_content = f"""// {label} Sample
 {pitch_comment}
+<global>
+loop_mode=no_loop
+
 <region>
 sample={audio_filename}
 pitch_keycenter={int(round(midi_note))}
@@ -61,17 +74,14 @@ lokey=0
 hikey=127
 {vel_lines}
 
-// Loop settings — sustain loop while key is held
-loop_mode=loop_sustain
-loop_start=0
-{loop_end_line}
+{loop_section}
 """
         
         return sfz_content
     
     def save(self, output_path: str, audio_filename: str, 
              detected_pitch: float | None, label: str,
-             fixed_velocity: bool = False):
+             fixed_velocity: bool = False, loop: bool = True):
         """
         Generate and save SFZ file.
         
@@ -85,7 +95,7 @@ loop_start=0
         audio_dir  = os.path.dirname(output_path)
         audio_path = os.path.join(audio_dir, audio_filename)
 
-        sfz_content = self.generate(audio_filename, detected_pitch, label, audio_path=audio_path, fixed_velocity=fixed_velocity)
+        sfz_content = self.generate(audio_filename, detected_pitch, label, audio_path=audio_path, fixed_velocity=fixed_velocity, loop=loop)
         
         with open(output_path, 'w') as f:
             f.write(sfz_content)

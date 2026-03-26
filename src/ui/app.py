@@ -30,7 +30,7 @@ from .theme import (
     HEADER_H, PAD, font,
 )
 from ..config import (
-    TEST_MODE, TEST_AUDIO_PATH, SAMPLES_DIR,
+    TEST_MODE, TEST_AUDIO_PATH, SAMPLES_DIR,IMPORT_DIR,
     RAW_FILENAME, CLEAN_FILENAME, SAMPLE_RATE,
     SFIZZ_BINARY,
 )
@@ -131,6 +131,19 @@ class SamplerApp(WorkersMixin, HandlersMixin, ScreensMixin):
         self._midi_status: str   = ""
         self._midi_vel_fixed: bool = False
 
+        # Persistent MIDI engine state
+        # _midi_engine_active  — sfizz_jack is running and has confirmed ready
+        # _midi_engine_loading — startup thread is in progress, not yet ready
+        # _midi_live_sfz       — absolute path of the SFZ currently loaded
+        # _midi_autoload       — when True, load selected sample on next EV_MIDI_READY
+        # _midi_browser_mode   — True while the user is in the MIDI browse flow
+        #                        (entered via home "MIDI Browse" button)
+        self._midi_engine_active:  bool = False
+        self._midi_engine_loading: bool = False
+        self._midi_live_sfz:       str  = ""
+        self._midi_autoload:       bool = False
+        self._midi_browser_mode:   bool = False
+
         # DTLN Warning
         self._dtln_warning = False
         self._dtln_warn_no_show = False
@@ -148,13 +161,18 @@ class SamplerApp(WorkersMixin, HandlersMixin, ScreensMixin):
         self.h_btn_record  = Button((PAD,                  HEADER_H + 18, bw, bh),
                                     "Record", ACCENT, BLACK, bold=True)
         self.h_btn_test    = Button((SCREEN_W - bw - PAD,  HEADER_H + 18, bw, bh),
-                                    "Test File", MID, WHITE)
+                                    "Imported Samples", MID, WHITE)
         self.h_btn_browse  = Button((PAD,                  HEADER_H + 88, bw, bh),
                                     "Browse Samples", MID, WHITE)
         self.h_dtln_toggle = Toggle(SCREEN_W - bw - PAD + 8, HEADER_H + 98,
-                                    "Use DTLN denoising")
+                                    "Use DTLN denoising", w=70, h=36)
         self.h_btn_quit    = Button((SCREEN_W - 78, 7, 68, 32),
                                     "Quit", RED_DIM, WHITE, fsize=14)
+        # Persistent MIDI engine toggle — sits below "Browse Samples" in the left column.
+        # The label and bg colour are overwritten every frame in _draw_home() to reflect
+        # the current engine state (off / loading / active).
+        self.h_btn_midi    = Button((PAD, HEADER_H + 158, 215, 46),
+                                    "MIDI Engine", DARK_MID, WHITE)
         
         # ── DTLN WARNING OVERLAY ──────────────────────────────────────────
         self.dtln_btn_ok     = Button((SCREEN_W//2 - 110, SCREEN_H//2 + 34, 100, 40),
@@ -198,6 +216,11 @@ class SamplerApp(WorkersMixin, HandlersMixin, ScreensMixin):
         self.lbl_buttons: list[tuple[Button, str]] = []
         self.lbl_btn_back = Button((PAD, SCREEN_H - 46, 90, 36),
                                    "Back", MID, WHITE, fsize=14)
+        self.lbl_loop_toggle = Toggle(
+            SCREEN_W - PAD - 70, SCREEN_H - 34,
+            "Loop", value=False, w=70, h=36, label_left=True
+        )
+        self.lbl_buttons: list[tuple[Button, str]] = []
 
         # ── BROWSER — folder list ──────────────────────────────────────────
         self.br_btn_back = Button((SCREEN_W - 90, 7, 80, 32),
@@ -224,8 +247,8 @@ class SamplerApp(WorkersMixin, HandlersMixin, ScreensMixin):
                                    "▶ Play", GREEN, BLACK, bold=True)
         self.brf_btn_midi = Button((PAD + 108,    SCREEN_H - 36, 100, 34),
                                    "MIDI", ACCENT, BLACK, bold=True)
-        self.brf_vel_toggle = Toggle(PAD, SCREEN_H - 100,
-                                     "Fix velocity")
+        self.brf_vel_toggle = Toggle(PAD, SCREEN_H - 118,
+                                     "Fix velocity", w=70, h=36)
         self.brf_btn_delete = Button((PAD + 236,   SCREEN_H - 36, 100, 34),
                                      "Delete", RED, WHITE, bold=True)
         
@@ -253,18 +276,21 @@ class SamplerApp(WorkersMixin, HandlersMixin, ScreensMixin):
         self._go('home')
 
     def _start_test_pick(self):
-        test_dir = os.path.dirname(TEST_AUDIO_PATH)
+        if not os.path.isdir(IMPORT_DIR):
+            self._status     = "No imported_samples folder on USB"
+            self._status_col = RED
+            return
         self._test_files = sorted(
-            f for f in os.listdir(test_dir) if f.lower().endswith('.wav'))
+            f for f in os.listdir(IMPORT_DIR) if f.lower().endswith('.wav'))
         if not self._test_files:
-            self._status     = "No WAV files found in test_samples/"
+            self._status     = "No WAV files found in imported_samples/"
             self._status_col = RED
             return
         self._test_scroll = 0
         self._go('test_pick')
 
     def _run_test_file(self, filename: str):
-        src = os.path.join(os.path.dirname(TEST_AUDIO_PATH), filename)
+        src = os.path.join(IMPORT_DIR, filename)
         shutil.copy2(src, RAW_FILENAME)
         self._go('processing')
         threading.Thread(target=self._process_worker,
@@ -314,12 +340,129 @@ class SamplerApp(WorkersMixin, HandlersMixin, ScreensMixin):
 
         self._go('browser_files')
 
-    def _go_midi_play(self):
-        """Transition to midi_play — find SFZ and launch sfizz_jack."""
+    # ──────────────────────────────────────────────────────────────────────
+    #  Persistent MIDI engine — helper methods
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _send_sfizz_cmd(self, cmd: str) -> bool:
+        """Write a single command line to sfizz_jack's stdin text interface.
+
+        sfizz_jack exposes a line-oriented control interface over its stdin pipe.
+        Supported commands include:
+            load_instrument <path>   — hot-swap the SFZ without restarting
+            quit                     — clean shutdown
+
+        Returns True if the write succeeded, False if the process is gone.
+        When the process is found dead the engine-active flag is cleared so
+        the UI reflects reality without waiting for the next event loop tick.
+        """
+        if self._sfizz_proc is None or self._sfizz_proc.poll() is not None:
+            # Process never started or has already exited — reset state.
+            if self._midi_engine_active:
+                self._midi_engine_active  = False
+                self._midi_engine_loading = False
+                self._midi_status = "Engine stopped unexpectedly — restart from home"
+            return False
+        try:
+            self._sfizz_proc.stdin.write((cmd + '\n').encode())
+            self._sfizz_proc.stdin.flush()
+            return True
+        except Exception:
+            # stdin write failed (broken pipe etc.) — treat engine as dead.
+            self._midi_engine_active  = False
+            self._midi_engine_loading = False
+            return False
+
+    def _start_midi_engine(self):
+        """Start sfizz_jack without an initial SFZ file.
+
+        sfizz_jack's FILE argument is optional (per its man page), so we can
+        launch the process now, get the JACK connections established, and then
+        hot-swap instruments on demand via 'load_instrument'.  This removes all
+        the per-sample stop/start latency — the engine stays alive for the
+        whole browsing session.
+
+        Sets _midi_engine_loading=True immediately so the home button turns
+        yellow.  The background thread posts EV_MIDI_READY when the process
+        is stable and the MIDI keyboard is connected.
+        """
+        if self._midi_engine_active or self._midi_engine_loading:
+            return   # already running or starting
+        self._midi_engine_loading = True
+        self._midi_live_sfz = ""
+        self._midi_status = "Starting MIDI engine…"
+        threading.Thread(
+            target=self._midi_launch_worker,
+            args=(None,),           # None = start without any SFZ file
+            daemon=True,
+        ).start()
+
+    def _stop_midi_engine(self):
+        """Cleanly shut down the persistent MIDI engine.
+
+        Sends 'quit' over stdin first — sfizz_jack handles this gracefully and
+        tears down its own JACK client.  We then fall through to the existing
+        _midi_stop_sfizz() which closes the pipe and kills the process if it
+        didn't exit in time.  All engine-state variables are reset so the home
+        button returns to its dimmed 'off' appearance.
+        """
+        self._send_sfizz_cmd('quit')
+        import time; time.sleep(0.2)   # give sfizz a moment to exit cleanly
+        self._midi_stop_sfizz()        # existing hard-kill fallback + cleanup
+        self._midi_engine_active  = False
+        self._midi_engine_loading = False
+        self._midi_live_sfz       = ""
+        self._midi_status         = ""
+
+    def _enter_midi_browse(self):
+        """Home 'MIDI Browse' button handler.
+
+        Starts the MIDI engine (stopping any stale instance first) and opens
+        the sample browser in MIDI mode.  The engine launches in the background
+        so the user can navigate folders immediately — by the time they tap a
+        sample sfizz_jack is usually already stable and connected.  If the engine
+        is still starting when the user taps a sample, _go_midi_play() queues
+        the load via _midi_autoload and it fires on EV_MIDI_READY.
+        """
+        if self._midi_engine_active or self._midi_engine_loading:
+            self._stop_midi_engine()
+        self._midi_browser_mode = True
+        self._start_midi_engine()
+        self._open_browser()
+
+    def _exit_midi_browse(self):
+        """Back-button handler for the MIDI-mode folder browser.
+
+        Tears down the engine and returns to the home screen.  Called only
+        from the folder-list Back button when _midi_browser_mode is True.
+        Navigating deeper (into a folder) does NOT call this — the user must
+        go all the way back to the folder list before they can exit MIDI mode.
+        """
+        self._midi_browser_mode = False
+        self._stop_midi_engine()
+        self._go_home()
+
+    def _load_sample_into_engine(self):
+        """Generate the SFZ for the selected sample and hot-swap it into sfizz.
+
+        This is the core of the persistent-engine workflow.  It replicates the
+        SFZ-generation logic from the old _go_midi_play() but instead of
+        restarting the process it sends a single 'load_instrument <path>'
+        command over stdin.  sfizz_jack swaps the instrument in the next audio
+        callback with no audible glitch or JACK dropout.
+
+        Pitch detection follows the same priority as before:
+          1. Use detected_pitch from the most recent processing run (_results).
+          2. Fall back to reading pitch_keycenter from the existing SFZ on disk.
+          3. Default to C4 (midi 60) if neither is available.
+
+        Velocity mode (fixed vs dynamic) respects the brf_vel_toggle state and
+        writes to a separate _fixedvel.sfz so the original file is preserved.
+        """
         if self._browser_sel is None:
             return
-        _, wav_path = self._browser_files[self._browser_sel]
 
+        _, wav_path = self._browser_files[self._browser_sel]
         sfz_dir = os.path.dirname(wav_path)
         sfz_candidates = [
             os.path.join(sfz_dir, f)
@@ -330,54 +473,118 @@ class SamplerApp(WorkersMixin, HandlersMixin, ScreensMixin):
             self._status     = "No SFZ file found for this sample"
             self._status_col = RED
             return
-        
-        # Rewrite SFZ with current velocity setting
+
         self._midi_vel_fixed = self.brf_vel_toggle.value
-        base_sfz = sfz_candidates[0]
+        base_sfz       = sfz_candidates[0]
         audio_filename = os.path.basename(wav_path)
 
-        # Always rewrite so velocity mode is guaranteed correct
-        if self._midi_vel_fixed:
-            target_sfz = base_sfz.replace('.sfz', '_fixedvel.sfz')
-        else:
-            target_sfz = base_sfz   # overwrite original with dynamic version
+        # Fixed-velocity variant lives in a separate file so the original SFZ
+        # (with dynamic velocity) is never overwritten by the toggle.
+        target_sfz = (base_sfz.replace('.sfz', '_fixedvel.sfz')
+                      if self._midi_vel_fixed else base_sfz)
 
-        # Detect pitch from the existing SFZ if _results not available
+        # Determine the pitch keycenter for the SFZ <region>.
         detected_pitch = None
         if self._results:
             detected_pitch = self._results.get('detected_pitch')
         else:
-            # Try to read pitch_keycenter from existing SFZ
             try:
                 with open(base_sfz) as f:
                     for line in f:
                         if 'pitch_keycenter' in line:
-                            midi_note = int(line.split('=')[1].strip())
                             import librosa
-                            detected_pitch = librosa.midi_to_hz(midi_note)
+                            detected_pitch = librosa.midi_to_hz(
+                                int(line.split('=')[1].strip()))
                             break
             except Exception:
                 pass
 
+        # Write the SFZ to its normal location in the samples folder.
+        # This preserves the pitch_keycenter value so the next load of this
+        # sample can read it back without re-running pitch detection.
         self.sampler.sfz_generator.save(
             target_sfz, audio_filename,
             detected_pitch,
             self._browser_sel_folder or 'sample',
             fixed_velocity=self._midi_vel_fixed,
         )
-        self._midi_sfz_path = target_sfz
 
-        self._midi_status = "Starting MIDI engine…"
-        self._go('midi_play')
-        threading.Thread(
-            target=self._midi_launch_worker,
-            args=(self._midi_sfz_path,),
-            daemon=True
-        ).start()
+        # Also write a second "preview" SFZ to a guaranteed space-free temp
+        # path.  sfizz_jack receives the path via its stdin text interface:
+        #
+        #   load_instrument /tmp/ss_preview.sfz
+        #
+        # If sfizz_jack splits the command on whitespace it would truncate
+        # a path like ".../Vocal Music/sample.sfz" to ".../Vocal" and silently
+        # fail to load the instrument.  /tmp/ss_preview.sfz has no spaces so
+        # the command is parsed correctly regardless of the sfizz version.
+        #
+        # The preview SFZ uses the absolute WAV path for its sample= opcode.
+        # Passing wav_path as the audio_filename argument to generate() makes
+        # the SFZ read:   sample=/absolute/path/to/Vocal Music_....wav
+        # sfizz reads the sample= value to end-of-line, so spaces inside
+        # the value (the filename) are handled correctly by its SFZ parser.
+        PREVIEW_SFZ  = '/tmp/ss_preview.sfz'
+        sfz_preview  = self.sampler.sfz_generator.generate(
+            wav_path,            # absolute path → written verbatim as sample=
+            detected_pitch,
+            self._browser_sel_folder or 'sample',
+            audio_path=wav_path, # also used for loop_end frame count
+            fixed_velocity=self._midi_vel_fixed,
+        )
+        with open(PREVIEW_SFZ, 'w') as _pf:
+            _pf.write(sfz_preview)
+
+        # Send the hot-swap command using the space-free preview path.
+        if self._send_sfizz_cmd(f'load_instrument {PREVIEW_SFZ}'):
+            self._midi_live_sfz = target_sfz   # display the real path in UI
+            self._midi_status   = f"Loaded: {os.path.basename(target_sfz)}"
+        else:
+            self._midi_status = "Engine not responding — restart from home"
+
+    # ──────────────────────────────────────────────────────────────────────
+    #  MIDI play state transitions
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _go_midi_play(self):
+        """Smart MIDI load — branches on whether the persistent engine is alive.
+
+        Three cases:
+          A. Engine is active → call _load_sample_into_engine() directly.
+             The user stays in browser_files; sfizz hot-swaps the instrument.
+          B. Engine is starting up → set _midi_autoload so that the engine
+             auto-loads this sample as soon as EV_MIDI_READY fires.
+          C. Engine is off → call _start_midi_engine() and set _midi_autoload.
+             Same auto-load mechanism as case B handles the delay.
+
+        In all three cases the UI never navigates away from browser_files,
+        so the user can immediately pick the next sample.
+        """
+        if self._browser_sel is None:
+            return
+
+        if self._midi_engine_active:
+            # Case A — instant hot-swap.
+            self._load_sample_into_engine()
+
+        elif self._midi_engine_loading:
+            # Case B — engine is already starting; queue the load.
+            self._midi_autoload = True
+            self._status     = "Engine starting — sample will auto-load…"
+            self._status_col = YELLOW
+
+        else:
+            # Case C — start engine then auto-load when ready.
+            self._midi_autoload = True
+            self._start_midi_engine()
 
     def _stop_midi_play(self):
+        """Stop button handler for the legacy midi_play screen."""
         self._midi_stop_sfizz()
-        self._go('browser_files')   # return to file list, not folder list
+        self._midi_engine_active  = False
+        self._midi_engine_loading = False
+        self._midi_live_sfz       = ""
+        self._go('browser_files')
 
     # ──────────────────────────────────────────────────────────────────────
     #  Main loop
