@@ -50,7 +50,7 @@ class SFZGenerator:
         if fixed_velocity:
             vel_lines = "lovel=0\nhivel=127\namp_veltrack=0"
         else:
-            vel_lines = "lovel=0\nhivel=127"
+            vel_lines = "lovel=0\nhivel=127\namp_velcurve_1=0.25"
 
         if loop:
             loop_section = (

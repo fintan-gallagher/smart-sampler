@@ -125,13 +125,6 @@ class HandlersMixin:
                 self._start_test_pick()
             if self.h_btn_browse.handle(ev):
                 self._open_browser()
-            if self.h_btn_midi.handle(ev):
-                # Navigate to the sample browser in MIDI mode.
-                # The engine starts in the background while the user browses
-                # folders.  Pressing Back from the folder list stops the engine
-                # and returns here.  _enter_midi_browse() handles stopping any
-                # stale engine instance before starting a fresh one.
-                self._enter_midi_browse()
             if self.h_dtln_toggle.handle(ev):
                 if self.h_dtln_toggle.value and not self._prefs.get('dtln_warn_dismissed'):
                     # undo the flip — overlay will confirm it
@@ -203,13 +196,8 @@ class HandlersMixin:
         # ── BROWSER — folder list ──────────────────────────────────────
         elif s == 'browser':
             if self.br_btn_back.handle(ev):
-                if self._midi_browser_mode:
-                    # Leaving MIDI mode: tear down the engine before going home.
-                    # _exit_midi_browse() clears _midi_browser_mode, stops sfizz,
-                    # and calls _go_home() — all in one step.
-                    self._exit_midi_browse()
-                else:
-                    self._go_home()
+                self._stop_midi_engine()
+                self._go_home()
             if self.br_btn_up.handle(ev):
                 self._browser_folder_scroll = max(0, self._browser_folder_scroll - 1)
                 self._browser_sel_folder_idx = None
@@ -229,14 +217,11 @@ class HandlersMixin:
                         'folder': folder,
                         'name':   folder,
                     }
+
             if ev.type == pygame.MOUSEBUTTONUP:
                 ITEM_H = 48
-                # In MIDI mode the engine-status line above the folder list
-                # shifts every row down by STATUS_H pixels.  The hit-rects
-                # must use the same offset as the draw code or clicks land on
-                # the wrong (invisible) position and require multiple taps.
-                STATUS_H = 18 if self._midi_browser_mode else 0
-                VISIBLE  = 4  if self._midi_browser_mode else 5
+                STATUS_H = 18
+                VISIBLE  = 4
                 for i in range(min(VISIBLE, len(self._browser_folders) - self._browser_folder_scroll)):
                     row = pygame.Rect(PAD, HEADER_H + 4 + STATUS_H + i * ITEM_H,
                                       SCREEN_W - 54, ITEM_H - 3)
@@ -255,8 +240,6 @@ class HandlersMixin:
                 self._browser_scroll = min(max_s, self._browser_scroll + 1)
             if self.brf_btn_play.handle(ev):
                 self._browser_play()
-            if self.brf_btn_midi.handle(ev):
-                self._go_midi_play()
             if self.brf_btn_delete.handle(ev):
                 if self._browser_sel is not None:
                     name, path = self._browser_files[self._browser_sel]
@@ -266,9 +249,6 @@ class HandlersMixin:
                         'name':   name,
                     }
             if self.brf_vel_toggle.handle(ev):
-                # If the engine is already running, re-generate the SFZ with
-                # the new velocity mode and hot-swap it in immediately so the
-                # user hears the change without touching any other button.
                 if self._midi_engine_active and self._browser_sel is not None:
                     self._load_sample_into_engine()
             if ev.type == pygame.MOUSEBUTTONUP:
@@ -280,19 +260,9 @@ class HandlersMixin:
                         self._browser_sel   = self._browser_scroll + i
                         self._browser_audio = None
                         self._load_browser_waveform()
-                        if self._midi_browser_mode:
-                            # MIDI mode: every tap immediately loads the sample.
-                            # _go_midi_play() handles whichever engine state we're in:
-                            #   active  → instant hot-swap via load_instrument stdin cmd
-                            #   loading → sets _midi_autoload; fires on EV_MIDI_READY
-                            #   off     → starts engine + sets _midi_autoload (edge case)
-                            self._go_midi_play()
+                        self._go_midi_play()
                         break
 
-        # ── MIDI PLAY ─────────────────────────────────────────────────
-        elif s == 'midi_play':
-            if self.midi_btn_stop.handle(ev):
-                self._stop_midi_play()
 
     def _build_label_buttons(self, predictions):
         self.lbl_buttons.clear()
@@ -305,7 +275,11 @@ class HandlersMixin:
             (PAD + BW + 5,   HEADER_H + 72),
             (PAD + (BW+5)*2, HEADER_H + 72),
         ]
-        for (label, conf), pos in zip(predictions[:6], positions):
+
+        labels = [(l, c) for l, c in predictions[:5]]
+        labels.append(("Other", 0.0))
+
+        for (label, conf), pos in zip(labels, positions):
             short = label if len(label) <= 16 else label[:14] + "…"
             btn   = Button((*pos, BW, BH), short, DARK_MID, WHITE, fsize=13)
             self.lbl_buttons.append((btn, label))

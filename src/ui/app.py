@@ -80,7 +80,7 @@ class SamplerApp(WorkersMixin, HandlersMixin, ScreensMixin):
     """
     State machine UI.
     States: home | test_pick | recording | processing | review | label |
-            browser | browser_files | midi_play
+            browser | browser_files
     """
 
     def __init__(self):
@@ -142,7 +142,6 @@ class SamplerApp(WorkersMixin, HandlersMixin, ScreensMixin):
         self._midi_engine_loading: bool = False
         self._midi_live_sfz:       str  = ""
         self._midi_autoload:       bool = False
-        self._midi_browser_mode:   bool = False
 
         # DTLN Warning
         self._dtln_warning = False
@@ -166,24 +165,22 @@ class SamplerApp(WorkersMixin, HandlersMixin, ScreensMixin):
                                     "Browse Samples", MID, WHITE)
         self.h_dtln_toggle = Toggle(SCREEN_W - bw - PAD + 8, HEADER_H + 98,
                                     "Use DTLN denoising", w=70, h=36)
-        self.h_btn_quit    = Button((SCREEN_W - 78, 7, 68, 32),
-                                    "Quit", RED_DIM, WHITE, fsize=14)
+        self.h_btn_quit    = Button((SCREEN_W - 110, 5, 100, 44),
+                                    "Quit", RED_DIM, WHITE, fsize=16)
         # Persistent MIDI engine toggle — sits below "Browse Samples" in the left column.
         # The label and bg colour are overwritten every frame in _draw_home() to reflect
         # the current engine state (off / loading / active).
-        self.h_btn_midi    = Button((PAD, HEADER_H + 158, 215, 46),
-                                    "MIDI Engine", DARK_MID, WHITE)
         
         # ── DTLN WARNING OVERLAY ──────────────────────────────────────────
-        self.dtln_btn_ok     = Button((SCREEN_W//2 - 110, SCREEN_H//2 + 34, 100, 40),
+        self.dtln_btn_ok     = Button((SCREEN_W//2 - 110, SCREEN_H//2 + 48, 100, 40),
                                       "Enable", ACCENT, BLACK, bold=True, fsize=13)
-        self.dtln_btn_cancel = Button((SCREEN_W//2 + 10,  SCREEN_H//2 + 34, 100, 40),
+        self.dtln_btn_cancel = Button((SCREEN_W//2 + 10,  SCREEN_H//2 + 48, 100, 40),
                                       "Cancel", RED, WHITE, bold=True, fsize=13)
-        self.dtln_warn_cb_rect = pygame.Rect(SCREEN_W//2 - 110, SCREEN_H//2 + 16, 18, 18)
+        self.dtln_warn_cb_rect = pygame.Rect(SCREEN_W//2 - 110, SCREEN_H//2 + 12, 28, 28)
 
         # ── TEST FILE PICKER ───────────────────────────────────────────────
-        self.tp_btn_back = Button((SCREEN_W - 88, 7, 78, 32),
-                                  "Back", MID, WHITE, fsize=14)
+        self.tp_btn_back = Button((SCREEN_W - 110, 5, 100, 44),
+                                  "Back", MID, WHITE, fsize=16)
         self.tp_btn_run  = Button((SCREEN_W//2 - 90, SCREEN_H - 50, 180, 38),
                                   "Process", ACCENT, BLACK, bold=True)
 
@@ -195,8 +192,8 @@ class SamplerApp(WorkersMixin, HandlersMixin, ScreensMixin):
         self.rec_vu_rect  = pygame.Rect(PAD, HEADER_H + 100, SCREEN_W - PAD*2, 14)
 
         # ── PRE-RECORD ────────────────────────────────────────────────────
-        self.pr_btn_back   = Button((SCREEN_W - 90, 7, 80, 32),
-                                    "Back", MID, WHITE, fsize=14)
+        self.pr_btn_back   = Button((SCREEN_W - 110, 5, 100, 44),
+                                    "Back", MID, WHITE, fsize=16)
         self.pr_btn_record = Button((SCREEN_W//2 - 75, SCREEN_H - 65, 150, 48),
                                     "Record", RED, WHITE, bold=True)
 
@@ -214,8 +211,8 @@ class SamplerApp(WorkersMixin, HandlersMixin, ScreensMixin):
 
         # ── LABEL SELECT ──────────────────────────────────────────────────
         self.lbl_buttons: list[tuple[Button, str]] = []
-        self.lbl_btn_back = Button((PAD, SCREEN_H - 46, 90, 36),
-                                   "Back", MID, WHITE, fsize=14)
+        self.lbl_btn_back = Button((PAD, SCREEN_H - 50, 100, 44),
+                                   "Back", MID, WHITE, fsize=16)
         self.lbl_loop_toggle = Toggle(
             SCREEN_W - PAD - 70, SCREEN_H - 34,
             "Loop", value=False, w=70, h=36, label_left=True
@@ -223,8 +220,8 @@ class SamplerApp(WorkersMixin, HandlersMixin, ScreensMixin):
         self.lbl_buttons: list[tuple[Button, str]] = []
 
         # ── BROWSER — folder list ──────────────────────────────────────────
-        self.br_btn_back = Button((SCREEN_W - 90, 7, 80, 32),
-                                  "Back", MID, WHITE, fsize=14)
+        self.br_btn_back = Button((SCREEN_W - 110, 5, 100, 44),
+                                  "Back", MID, WHITE, fsize=16)
         self.br_btn_up   = Button((SCREEN_W - 44, HEADER_H + 4,  34, 56),
                                   "▲", DARK_MID, WHITE)
         self.br_btn_dn   = Button((SCREEN_W - 44, HEADER_H + 66, 34, 56),
@@ -235,8 +232,8 @@ class SamplerApp(WorkersMixin, HandlersMixin, ScreensMixin):
                                   "Delete", RED,    WHITE, bold=True)
 
         # ── BROWSER FILES — file list inside a folder ──────────────────────
-        self.brf_btn_back = Button((SCREEN_W - 90, 7, 80, 32),
-                                   "Back", MID, WHITE, fsize=14)
+        self.brf_btn_back = Button((SCREEN_W - 110, 5, 100, 44),
+                                   "Back", MID, WHITE, fsize=16)
         self.brf_btn_up   = Button((SCREEN_W - 44, HEADER_H + 4,  34, 56),
                                    "▲", DARK_MID, WHITE)
         self.brf_btn_dn   = Button((SCREEN_W - 44, HEADER_H + 66, 34, 56),
@@ -245,9 +242,7 @@ class SamplerApp(WorkersMixin, HandlersMixin, ScreensMixin):
             (PAD, SCREEN_H - 78, SCREEN_W - PAD*2, 38))
         self.brf_btn_play = Button((PAD,          SCREEN_H - 36, 100, 34),
                                    "▶ Play", GREEN, BLACK, bold=True)
-        self.brf_btn_midi = Button((PAD + 108,    SCREEN_H - 36, 100, 34),
-                                   "MIDI", ACCENT, BLACK, bold=True)
-        self.brf_vel_toggle = Toggle(PAD, SCREEN_H - 118,
+        self.brf_vel_toggle = Toggle(PAD, SCREEN_H - 138,
                                      "Fix velocity", w=70, h=36)
         self.brf_btn_delete = Button((PAD + 236,   SCREEN_H - 36, 100, 34),
                                      "Delete", RED, WHITE, bold=True)
@@ -256,12 +251,6 @@ class SamplerApp(WorkersMixin, HandlersMixin, ScreensMixin):
                                    "Yes", ACCENT, BLACK, bold=True, fsize=13)
         self.cont_btn_no  = Button((SCREEN_W//2 + 10,  SCREEN_H//2 + 20, 100, 40),
                                    "No", RED, WHITE, bold=True, fsize=13)
-
-        # ── MIDI PLAY ─────────────────────────────────────────────────────
-        self.midi_waveform = WaveformWidget(
-            (PAD, HEADER_H + 10, SCREEN_W - PAD*2, 80))
-        self.midi_btn_stop = Button((SCREEN_W//2 - 75, SCREEN_H - 55, 150, 44),
-                                    "Stop", RED, WHITE, bold=True)
 
     # ──────────────────────────────────────────────────────────────────────
     #  State transitions
@@ -320,6 +309,11 @@ class SamplerApp(WorkersMixin, HandlersMixin, ScreensMixin):
                 f for f in os.listdir(SAMPLES_DIR)
                 if os.path.isdir(os.path.join(SAMPLES_DIR, f))
             )
+
+        # Start the MIDI engine in the background when entering the browser
+        if not self._midi_engine_active and not self._midi_engine_loading:
+            self._start_midi_engine()
+
         self._go('browser')
 
     def _open_browser_folder(self, folder_name: str):
@@ -382,18 +376,7 @@ class SamplerApp(WorkersMixin, HandlersMixin, ScreensMixin):
         self._midi_engine_loading = False
         self._midi_live_sfz       = ""
         self._midi_status         = ""
-
-    def _enter_midi_browse(self):
-        if self._midi_engine_active or self._midi_engine_loading:
-            self._stop_midi_engine()
-        self._midi_browser_mode = True
-        self._start_midi_engine()
-        self._open_browser()
-
-    def _exit_midi_browse(self):
-        self._midi_browser_mode = False
-        self._stop_midi_engine()
-        self._go_home()
+    
 
     def _load_sample_into_engine(self):
         if self._browser_sel is None:
@@ -483,14 +466,6 @@ class SamplerApp(WorkersMixin, HandlersMixin, ScreensMixin):
             # Case C — start engine then auto-load when ready.
             self._midi_autoload = True
             self._start_midi_engine()
-
-    def _stop_midi_play(self):
-        """Stop button handler for the legacy midi_play screen."""
-        self._midi_stop_sfizz()
-        self._midi_engine_active  = False
-        self._midi_engine_loading = False
-        self._midi_live_sfz       = ""
-        self._go('browser_files')
 
     # ──────────────────────────────────────────────────────────────────────
     #  Main loop

@@ -20,7 +20,7 @@ GREEN      = (55,  195, 75)
 YELLOW     = (225, 180, 0)
 ORANGE     = (225, 125, 0)
 
-HEADER_H = 48
+HEADER_H = 54
 PAD      = 10
 
 _fonts: dict = {}
